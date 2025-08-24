@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Band Studio (Versión Armónica)</title>
+    <style>
+        body { font-family: 'Google Sans', sans-serif, system-ui; text-align: center; background: #f0f2f5; color: #333; padding: 1em; }
+        .container { max-width: 800px; margin: auto; background: white; padding: 2em; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
+        h1 { color: #1a73e8; }
+        #controls { margin: 20px 0; display: flex; justify-content: center; gap: 20px; flex-wrap: wrap; }
+        .instrument-toggle { display: flex; align-items: center; gap: 8px; font-size: 16px; }
+        input[type="checkbox"] { width: 20px; height: 20px; }
+        #generateButton {
+            background-color: #34A853; color: white; border: none; padding: 15px 30px;
+            font-size: 18px; border-radius: 8px; cursor: pointer; transition: background-color 0.3s; margin-top: 20px;
+        }
+        #generateButton:disabled { background-color: #9e9e9e; cursor: not-allowed; }
+        #visualizer { margin-top: 25px; border: 1px solid #ccc; width: 100%; box-sizing: border-box;}
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@magenta/music@1.23.1/dist/magentamusic.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h1>🎹 AI Band Studio (Armónico) 🥁</h1>
+        <p>Selecciona los instrumentos y la IA creará un riff donde todos tocan en armonía.</p>
+        
+        <div id="controls">
+            <div class="instrument-toggle"><input type="checkbox" id="guitar" checked><label for="guitar">🎸 Guitarra (Solista)</label></div>
+            <div class="instrument-toggle"><input type="checkbox" id="trio" checked><label for="trio">🎹 Banda Base (Piano, Bajo, Batería)</label></div>
+        </div>
+
+        <button id="generateButton" disabled>Cargando Modelos...</button>
+        <canvas id="visualizer"></canvas>
+    </div>
+
+    <script>
+        // --- MODELOS ---
+        // Solo necesitamos el modelo de Tríos, ya que derivaremos la guitarra de él.
+        const trioVAE = new mm.MusicVAE('https://storage.googleapis.com/magentadata/js/checkpoints/music_vae/trio_16bar');
+        const soundFontPlayer = new mm.SoundFontPlayer('https://storage.googleapis.com/magentadata/js/soundfonts/sgm_plus');
+
+        // --- INICIALIZACIÓN ---
+        trioVAE.initialize().then(() => {
+            document.getElementById('generateButton').disabled = false;
+            document.getElementById('generateButton').innerText = '¡Componer!';
+        });
+
+        const generateButton = document.getElementById('generateButton');
+        generateButton.onclick = async () => {
+            if (soundFontPlayer.isPlaying()) {
+                soundFontPlayer.stop();
+                generateButton.innerText = '¡Componer!';
+                return;
+            }
+
+            generateButton.disabled = true;
+            generateButton.innerText = 'Componiendo... 🧠';
+
+            const activeInstruments = {
+                guitar: document.getElementById('guitar').checked,
+                trio: document.getElementById('trio').checked,
+            };
+
+            if (!activeInstruments.guitar && !activeInstruments.trio) {
+                alert("¡Debes seleccionar al menos un instrumento!");
+                generateButton.disabled = false;
+                generateButton.innerText = '¡Componer!';
+                return;
+            }
+
+            let finalSequence;
+
+            if (activeInstruments.trio) {
+                // Generamos la base del trío. Esta será nuestra fuente de verdad musical.
+                const trioPart = (await trioVAE.sample(1))[0];
+                
+                if (activeInstruments.guitar) {
+                    // --- NUEVA LÓGICA ARMÓNICA PARA LA GUITARRA ---
+                    // 1. Creamos una copia de la partitura del trío para no modificar la original.
+                    finalSequence = mm.sequences.clone(trioPart);
+
+                    // 2. Recorremos las notas de la nueva partitura.
+                    finalSequence.notes.forEach(note => {
+                        // 3. Si la nota es del piano (instrumento 0), la convertimos en una nota de guitarra.
+                        if (note.instrument === 0) { // 0 es el piano en el modelo de trío
+                            note.program = 29; // 29 = Overdriven Guitar
+                            note.pitch += 12; // La subimos una octava para que suene como un solo
+                        }
+                    });
+                } else {
+                    // Si solo está el trío, usamos su partitura directamente.
+                    finalSequence = trioPart;
+                }
+            } else {
+                // Si solo está la guitarra, no podemos generarla (necesita la base del piano).
+                alert("Para generar una guitarra, la 'Banda Base' debe estar seleccionada.");
+                generateButton.disabled = false;
+                generateButton.innerText = '¡Componer!';
+                return;
+            }
+
+            // --- FUSIÓN Y REPRODUCCIÓN ---
+            const visualizer = new mm.PianoRollCanvasVisualizer(finalSequence, document.getElementById('visualizer'));
+
+            generateButton.innerText = 'Cargando Instrumentos...';
+            await soundFontPlayer.loadSamples(finalSequence);
+            
+            generateButton.disabled = false;
+            generateButton.innerText = '■ Detener';
+            soundFontPlayer.start(finalSequence).then(() => {
+                generateButton.innerText = '¡Componer!';
+            });
+        };
+    </script>
+</body>
+</html>

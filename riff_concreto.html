@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Callaíta (Vibe Check Version)</title>
+    <style>
+        body { font-family: 'Google Sans', sans-serif, system-ui; text-align: center; background: #121212; color: #e0e0e0; padding: 1em; }
+        .container { max-width: 800px; margin: auto; background: #1e1e1e; padding: 2em; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.4); }
+        h1 { color: #82d8ff; }
+        p { font-size: 1.1em; }
+        #playButton {
+            background-color: #82d8ff; color: #1a2a33; border: none; padding: 15px 30px;
+            font-size: 18px; font-weight: bold; border-radius: 8px; cursor: pointer; transition: background-color 0.3s; margin-top: 20px;
+        }
+        #playButton:disabled { background-color: #333; color: #888; cursor: not-allowed; }
+        #visualizer { margin-top: 25px; border: 1px solid #444; width: 100%; box-sizing: border-box;}
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@magenta/music@1.23.1/dist/magentamusic.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h1>🎹 Callaíta (Vibe Check Version) 🌴</h1>
+        <p>Versión larga con los instrumentos y el ritmo corregidos para sonar más fiel a la original.</p>
+        
+        <button id="playButton">Tocar</button>
+        <canvas id="visualizer"></canvas>
+    </div>
+
+    <script>
+        const soundFontPlayer = new mm.SoundFontPlayer('https://storage.googleapis.com/magentadata/js/soundfonts/sgm_plus');
+
+        // --- MAPA DE INSTRUMENTOS PARA EL VIBE "CALLAÍTA" ---
+        const INSTRUMENTS = {
+            melody: 108, // Kalimba - ¡El sonido clave!
+            pads: 91,    // Pad 4 (choir) - Para la atmósfera
+            bass: 38,    // Synth Bass 1 - Para el bajo profundo
+        };
+
+        const TOTAL_STEPS = 352; // 22 compases
+        
+        // --- SECCIONES MUSICALES TRANSCRITAS ---
+        // (La melodía es la misma, pero le asignaremos el programa de Kalimba)
+        const introMelodyNotes = Array(4).fill(0).flatMap((_, bar) => [
+            {pitch: 64, quantizedStartStep: bar*16 + 0, quantizedEndStep: bar*16 + 1}, {pitch: 67, quantizedStartStep: bar*16 + 1, quantizedEndStep: bar*16 + 2}, {pitch: 69, quantizedStartStep: bar*16 + 2, quantizedEndStep: bar*16 + 3}, {pitch: 71, quantizedStartStep: bar*16 + 3, quantizedEndStep: bar*16 + 4},
+            {pitch: 72, quantizedStartStep: bar*16 + 4, quantizedEndStep: bar*16 + 5}, {pitch: 71, quantizedStartStep: bar*16 + 5, quantizedEndStep: bar*16 + 6}, {pitch: 69, quantizedStartStep: bar*16 + 6, quantizedEndStep: bar*16 + 7}, {pitch: 67, quantizedStartStep: bar*16 + 7, quantizedEndStep: bar*16 + 8},
+            {pitch: 64, quantizedStartStep: bar*16 + 8, quantizedEndStep: bar*16 + 9}, {pitch: 67, quantizedStartStep: bar*16 + 9, quantizedEndStep: bar*16 + 10}, {pitch: 69, quantizedStartStep: bar*16 + 10, quantizedEndStep: bar*16 + 11}, {pitch: 71, quantizedStartStep: bar*16 + 11, quantizedEndStep: bar*16 + 12},
+            {pitch: 72, quantizedStartStep: bar*16 + 12, quantizedEndStep: bar*16 + 13}, {pitch: 71, quantizedStartStep: bar*16 + 13, quantizedEndStep: bar*16 + 14}, {pitch: 69, quantizedStartStep: bar*16 + 14, quantizedEndStep: bar*16 + 15}, {pitch: 67, quantizedStartStep: bar*16 + 15, quantizedEndStep: bar*16 + 16},
+        ]);
+        const verseMelodyNotes = [
+            {pitch: 64, quantizedStartStep: 0, quantizedEndStep: 2}, {pitch: 64, quantizedStartStep: 2, quantizedEndStep: 4}, {pitch: 64, quantizedStartStep: 4, quantizedEndStep: 6}, {pitch: 64, quantizedStartStep: 6, quantizedEndStep: 8},
+            {pitch: 65, quantizedStartStep: 8, quantizedEndStep: 10}, {pitch: 64, quantizedStartStep: 10, quantizedEndStep: 12}, {pitch: 62, quantizedStartStep: 12, quantizedEndStep: 14}, {pitch: 62, quantizedStartStep: 14, quantizedEndStep: 16},
+            {pitch: 60, quantizedStartStep: 16, quantizedEndStep: 18}, {pitch: 60, quantizedStartStep: 18, quantizedEndStep: 20}, {pitch: 60, quantizedStartStep: 20, quantizedEndStep: 22}, {pitch: 60, quantizedStartStep: 22, quantizedEndStep: 24},
+            {pitch: 62, quantizedStartStep: 24, quantizedEndStep: 26}, {pitch: 64, quantizedStartStep: 26, quantizedEndStep: 28}, {pitch: 62, quantizedStartStep: 28, quantizedEndStep: 30}, {pitch: 62, quantizedStartStep: 30, quantizedEndStep: 32},
+            {pitch: 69, quantizedStartStep: 32, quantizedEndStep: 36}, {pitch: 69, quantizedStartStep: 36, quantizedEndStep: 40}, {pitch: 67, quantizedStartStep: 40, quantizedEndStep: 44}, {pitch: 65, quantizedStartStep: 44, quantizedEndStep: 48},
+            {pitch: 64, quantizedStartStep: 48, quantizedEndStep: 56}, {pitch: 62, quantizedStartStep: 56, quantizedEndStep: 64},
+        ];
+        
+        // BATERÍA DEMBOW SUTIL
+        const drumPattern = {
+            notes: [
+                { pitch: 36, quantizedStartStep: 0, quantizedEndStep: 1, isDrum: true },  // Kick
+                { pitch: 37, quantizedStartStep: 4, quantizedEndStep: 5, isDrum: true },  // Side Stick / Rimshot
+                { pitch: 36, quantizedStartStep: 6, quantizedEndStep: 7, isDrum: true },  // Kick
+                { pitch: 37, quantizedStartStep: 10, quantizedEndStep: 11, isDrum: true },// Side Stick / Rimshot
+                { pitch: 36, quantizedStartStep: 12, quantizedEndStep: 13, isDrum: true },// Kick
+            ],
+            totalQuantizedSteps: 16
+        };
+
+        // ACORDES DE PAD PARA LA ATMÓSFERA
+        const chords = [ {p:[45, 48, 52], d:64}, {p:[43, 47, 50], d:64}, {p:[48, 52, 55], d:64}, {p:[41, 45, 48], d:64} ]; // Am, G, C, F
+        const padsPartNotes = chords.flatMap((chord, i) => chord.p.map(pitch => ({
+            pitch: pitch,
+            quantizedStartStep: i * 64,
+            quantizedEndStep: (i + 1) * 64,
+            program: INSTRUMENTS.pads
+        })));
+
+
+        const playButton = document.getElementById('playButton');
+        playButton.onclick = async () => {
+            if (soundFontPlayer.isPlaying()) {
+                soundFontPlayer.stop();
+                playButton.innerText = 'Tocar';
+                return;
+            }
+
+            playButton.disabled = true;
+            playButton.innerText = 'Construyendo Canción...';
+
+            // --- CONSTRUCCIÓN DE LA CANCIÓN COMPLETA ---
+            let allNotes = [];
+            let currentTime = 0;
+
+            // Función para añadir una sección a la canción
+            function addSection(melodyNotes, sectionDuration) {
+                allNotes.push(...melodyNotes.map(n => ({...n, program: INSTRUMENTS.melody, quantizedStartStep: n.quantizedStartStep + currentTime, quantizedEndStep: n.quantizedEndStep + currentTime})));
+                currentTime += sectionDuration;
+            }
+
+            // Estructura: Intro(4), Verso(4), Coro(fake, 8), Verso(4), Coro(fake, 8) -> total 28 compases
+            // Usamos las notas de la intro y el verso para llenar la estructura
+            addSection(introMelodyNotes, 64);
+            addSection(verseMelodyNotes, 64);
+            addSection(introMelodyNotes, 64); // Usando intro como un pre-coro
+            addSection(verseMelodyNotes, 64); // Verso 2
+            addSection(introMelodyNotes, 64); // Outro
+            
+            const totalSteps = currentTime;
+
+            // AÑADIR BAJO, PADS Y BATERÍA
+            const bassNotes = [ {p:33,d:64}, {p:31,d:64}, {p:36,d:64}, {p:29,d:64} ]; //Am, G, C, F
+            const fullBassNotes = bassNotes.flatMap((note, i) => ({
+                pitch: note.p, quantizedStartStep: i * 64, quantizedEndStep: (i + 1) * 64, program: INSTRUMENTS.bass
+            }));
+            allNotes.push(...fullBassNotes);
+            allNotes.push(...padsPartNotes); // Pads solo para los primeros 4 compases
+
+            // Repetir Batería
+            const drumRepetitions = totalSteps / drumPattern.totalQuantizedSteps;
+            for (let i = 0; i < drumRepetitions; i++) {
+                const timeOffset = i * drumPattern.totalQuantizedSteps;
+                drumPattern.notes.forEach(note => allNotes.push({...note, quantizedStartStep: note.quantizedStartStep + timeOffset, quantizedEndStep: note.quantizedEndStep + timeOffset}));
+            }
+            
+            const finalSequence = { notes: allNotes, totalQuantizedSteps: totalSteps, quantizationInfo: { stepsPerQuarter: 4 } };
+            const visualizer = new mm.PianoRollCanvasVisualizer(finalSequence, document.getElementById('visualizer'));
+            
+            playButton.innerText = 'Cargando Instrumentos...';
+            await soundFontPlayer.loadSamples(finalSequence);
+            
+            playButton.disabled = false;
+            playButton.innerText = '■ Detener';
+            soundFontPlayer.start(finalSequence, 92).then(() => { // TEMPO 92 BPM
+                playButton.innerText = 'Tocar';
+            });
+        };
+    </script>
+</body>
+</html>

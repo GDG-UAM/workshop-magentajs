@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Band Studio (Versión Estable)</title>
+    <style>
+        body { font-family: 'Google Sans', sans-serif, system-ui; text-align: center; background: #f0f2f5; color: #333; padding: 1em; }
+        .container { max-width: 800px; margin: auto; background: white; padding: 2em; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
+        h1 { color: #1a73e8; }
+        #controls { margin: 20px 0; display: flex; justify-content: center; gap: 20px; flex-wrap: wrap; }
+        .instrument-toggle { display: flex; align-items: center; gap: 8px; font-size: 16px; }
+        input[type="checkbox"] { width: 20px; height: 20px; }
+        #generateButton {
+            background-color: #34A853; color: white; border: none; padding: 15px 30px;
+            font-size: 18px; border-radius: 8px; cursor: pointer; transition: background-color 0.3s; margin-top: 20px;
+        }
+        #generateButton:disabled { background-color: #9e9e9e; cursor: not-allowed; }
+        #visualizer { margin-top: 25px; border: 1px solid #ccc; width: 100%; box-sizing: border-box;}
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@magenta/music@1.23.1/dist/magentamusic.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h1>🎹 AI Band Studio (Estable) 🥁</h1>
+        <p>Selecciona los instrumentos y pulsa "Componer" para que la IA cree un riff completo para tu banda.</p>
+        
+        <div id="controls">
+            <div class="instrument-toggle"><input type="checkbox" id="guitar" checked><label for="guitar">🎸 Guitarra (Solista)</label></div>
+            <div class="instrument-toggle"><input type="checkbox" id="trio" checked><label for="trio">🎹 Banda Base (Piano, Bajo, Batería)</label></div>
+        </div>
+
+        <button id="generateButton" disabled>Cargando Modelos...</button>
+        <canvas id="visualizer"></canvas>
+    </div>
+
+    <script>
+        const melodyRNN = new mm.MusicRNN('https://storage.googleapis.com/magentadata/js/checkpoints/music_rnn/basic_rnn');
+        const trioVAE = new mm.MusicVAE('https://storage.googleapis.com/magentadata/js/checkpoints/music_vae/trio_16bar');
+        const soundFontPlayer = new mm.SoundFontPlayer('https://storage.googleapis.com/magentadata/js/soundfonts/sgm_plus');
+
+        Promise.all([melodyRNN.initialize(), trioVAE.initialize()]).then(() => {
+            document.getElementById('generateButton').disabled = false;
+            document.getElementById('generateButton').innerText = '¡Componer!';
+        });
+
+        const generateButton = document.getElementById('generateButton');
+        generateButton.onclick = async () => {
+            if (soundFontPlayer.isPlaying()) {
+                soundFontPlayer.stop();
+                generateButton.innerText = '¡Componer!';
+                return;
+            }
+
+            generateButton.disabled = true;
+            generateButton.innerText = 'Componiendo... 🧠';
+
+            const activeInstruments = {
+                guitar: document.getElementById('guitar').checked,
+                trio: document.getElementById('trio').checked,
+            };
+
+            let parts = [];
+
+            if (activeInstruments.trio) {
+                const trioPart = (await trioVAE.sample(1))[0];
+                parts.push(trioPart);
+            }
+
+            if (activeInstruments.guitar) {
+                const guitarSeed = {
+                    notes: [{ pitch: 67, quantizedStartStep: 0, quantizedEndStep: 4 }],
+                    totalQuantizedSteps: 4,
+                    quantizationInfo: { stepsPerQuarter: 4 }
+                };
+                const guitarPart = await melodyRNN.continueSequence(guitarSeed, 252, 1.1);
+                guitarPart.notes.forEach(note => note.program = 29);
+                parts.push(guitarPart);
+            }
+
+            if (parts.length === 0) {
+                alert("¡Debes seleccionar al menos un instrumento!");
+                generateButton.disabled = false;
+                generateButton.innerText = '¡Componer!';
+                return;
+            }
+
+            // --- CORRECCIÓN: FUSIÓN MANUAL DE LAS PARTITURAS ---
+            const allNotes = [].concat(...parts.map(p => p.notes));
+            const totalQuantizedSteps = Math.max(...parts.map(p => p.totalQuantizedSteps || 0));
+
+            const finalSequence = {
+                notes: allNotes,
+                totalQuantizedSteps: totalQuantizedSteps,
+                quantizationInfo: { stepsPerQuarter: 4 }
+            };
+            // --- FIN DE LA CORRECCIÓN ---
+
+            const visualizer = new mm.PianoRollCanvasVisualizer(finalSequence, document.getElementById('visualizer'));
+
+            generateButton.innerText = 'Cargando Instrumentos...';
+            await soundFontPlayer.loadSamples(finalSequence);
+            
+            generateButton.disabled = false;
+            generateButton.innerText = '■ Detener';
+            soundFontPlayer.start(finalSequence).then(() => {
+                generateButton.innerText = '¡Componer!';
+            });
+        };
+    </script>
+</body>
+</html>
