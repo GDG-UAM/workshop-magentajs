@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Coconet – Demo básica (Bach 4 voces)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="https://cdn.jsdelivr.net/npm/@magenta/music@1.23.1"></script>
+  <style>
+    body{margin:0;font-family:system-ui;background:#0e1117;color:#e7e9ef;min-height:100vh;display:grid;place-items:center;padding:24px}
+    .app{width:min(1000px,100%);display:grid;gap:16px}
+    .card{background:#141a24;border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:16px}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+    .controls{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
+    button{border:1px solid rgba(255,255,255,.12);background:#1d2536;color:#fff;border-radius:10px;padding:8px 12px;font-weight:600;cursor:pointer}
+    .primary{background:linear-gradient(180deg,#6aa3ff,#4c7bff)}
+    .danger{background:linear-gradient(180deg,#ff6a6a,#e24b4b)}
+    svg{width:100%;height:220px;background:#0b0f17;border-radius:10px;display:block}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="card" style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+      <div>
+        <h1 style="margin:0;font-size:20px">Coconet – Armonizar soprano (Bach a 4 voces)</h1>
+        <div style="opacity:.7;font-size:12px">1) Cargar · 2) Infill · 3) Reproducir / Descargar</div>
+      </div>
+      <div class="controls">
+        <button id="load" class="primary">Cargar Coconet</button>
+        <button id="infill" disabled>Infill (completar voces)</button>
+      </div>
+    </header>
+
+    <div class="row">
+      <div class="card">
+        <h3 style="margin:0 0 8px">Entrada (solo soprano, cuantizada)</h3>
+        <div class="controls">
+          <button id="playIn">▶ Play Entrada</button>
+          <button id="stopIn" class="danger">■ Stop</button>
+          <button id="dlIn">⤓ Descargar MIDI</button>
+        </div>
+        <div style="opacity:.7;font-size:12px">Voces: S=inst 0, A=1, T=2, B=3 · QPM: 90</div>
+        <svg id="vizIn"></svg>
+      </div>
+
+      <div class="card">
+        <h3 style="margin:0 0 8px">Salida Coconet (4 voces)</h3>
+        <div class="controls">
+          <button id="playOut" disabled>▶ Play Salida</button>
+          <button id="stopOut" class="danger" disabled>■ Stop</button>
+          <button id="dlOut" disabled>⤓ Descargar MIDI</button>
+        </div>
+        <svg id="vizOut"></svg>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const COCONET_CKPT = "https://storage.googleapis.com/magentadata/js/checkpoints/coconet/bach";
+    const QPM = 90, STEPS_PER_QUARTER = 4, TOTAL_STEPS = 32;
+
+    let model=null, seqInQ=null, seqIn=null, seqOut=null, lastOutQ=null;
+    const playerIn=new mm.Player(), playerOut=new mm.Player();
+
+    async function ensureAudio(){
+      try{ const ctx = mm.Player.tone.getContext(); if (ctx.state !== "running") await ctx.resume(); }catch{}
+    }
+
+    function buildSopranoQuantized(qpm=QPM){
+      const qns={quantizationInfo:{stepsPerQuarter:STEPS_PER_QUARTER},timeSignatures:[{time:0,numerator:4,denominator:4}],
+        tempos:[{time:0,qpm}],notes:[],totalQuantizedSteps:TOTAL_STEPS};
+      const add=(p,st,d=4,v=100)=>qns.notes.push({pitch:p,instrument:0,program:0,isDrum:false,velocity:v,
+        quantizedStartStep:st,quantizedEndStep:st+d});
+      let st=0; [60,62,64,65,67,69,71,72].forEach(p=>{add(p,st,4); st+=4;});
+      return qns;
+    }
+
+    function draw(svg, ns){ svg.replaceChildren(); return new mm.PianoRollSVGVisualizer(ns, svg, {noteHeight:8, noteSpacing:2, pixelsPerTimeStep:32, activeNoteRGB:'255,255,255'}); }
+    const vizInSvg=document.getElementById('vizIn'), vizOutSvg=document.getElementById('vizOut'); let vizIn,vizOut;
+
+    function initInput(){
+      seqInQ = buildSopranoQuantized(QPM);
+      seqIn  = mm.sequences.unquantizeSequence(seqInQ, QPM);
+      vizIn  = draw(vizInSvg, seqIn);
+    }
+    initInput();
+
+    const $=id=>document.getElementById(id);
+    const btnLoad=$('load'), btnInfill=$('infill');
+    const playIn=$('playIn'), stopIn=$('stopIn'), dlIn=$('dlIn');
+    const playOut=$('playOut'), stopOut=$('stopOut'), dlOut=$('dlOut');
+
+    btnLoad.onclick = async ()=>{
+      btnLoad.disabled=true;
+      try{
+        model = new mm.Coconet(COCONET_CKPT);
+        await model.initialize();
+        btnInfill.disabled=false;
+        btnLoad.textContent="Coconet listo ✓";
+      }catch(e){ console.error(e); btnLoad.disabled=false; btnLoad.textContent="Reintentar Coconet"; alert("No se pudo cargar Coconet."); }
+    };
+
+    btnInfill.onclick = async ()=>{
+      if(!model||!seqInQ) return;
+      btnInfill.disabled=true;
+      try{
+        // ⬇️ Nada de mergeHeldNotes. Guardamos la salida cuantizada tal cual.
+        lastOutQ = await model.infill(seqInQ, {temperature:0.99, numIterations:64});
+        // Para visualizar/reproducir, la pasamos a tiempo real:
+        seqOut = mm.sequences.unquantizeSequence(lastOutQ, QPM);
+        vizOut = draw(vizOutSvg, seqOut);
+        playOut.disabled = stopOut.disabled = dlOut.disabled = false;
+        btnInfill.textContent="Infill hecho ✓";
+      }catch(e){ console.error(e); btnInfill.disabled=false; btnInfill.textContent="Infill (completar voces)"; alert("Falló el infill."); }
+    };
+
+    playIn.onclick  = async ()=>{ await ensureAudio(); playerOut.stop(); try{ await playerIn.start(seqInQ, QPM);}catch{} };
+    stopIn.onclick  = ()=> playerIn.stop();
+    dlIn.onclick    = ()=>{ const bytes=mm.sequenceProtoToMidi(seqInQ); const url=URL.createObjectURL(new Blob([bytes],{type:'audio/midi'})); const a=Object.assign(document.createElement('a'),{href:url,download:'coconet_input_soprano.mid'}); document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),1e3); };
+
+    playOut.onclick = async ()=>{ await ensureAudio(); playerIn.stop(); if(seqOut) try{ await playerOut.start(seqOut);}catch{} };
+    stopOut.onclick = ()=> playerOut.stop();
+    dlOut.onclick   = ()=>{ if(!lastOutQ) return; const bytes=mm.sequenceProtoToMidi(lastOutQ);
+      const url=URL.createObjectURL(new Blob([bytes],{type:'audio/midi'}));
+      const a=Object.assign(document.createElement('a'),{href:url,download:'coconet_output_4voices.mid'});
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),1e3); };
+  </script>
+</body>
+</html>
