@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>Workshop – Coconet</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="../generic/generic.css" />
+  <script src="https://unpkg.com/@magenta/music@1.23.1"></script>
+  <script type="module" src="../generic/generic.js"></script>
+</head>
+<body>
+  <header class="bar">
+    <input id="songTitle" placeholder="Título de la canción" />
+    <div id="transport"></div>
+  </header>
+  <main class="grid">
+    <section class="card">
+      <h3>Melodía / Pistas</h3>
+      <div id="visualizer" class="viz"></div>
+      <div id="tracksPanel"></div>
+    </section>
+    <aside class="card">
+      <h3>Herramientas</h3>
+      <div id="trimPanel"></div>
+      <div id="saveLoadPanel"></div>
+      <hr />
+      <h3>Modelos</h3>
+      <div id="modelsPanel"></div>
+    </aside>
+  </main>
+
+  <script type="module">
+    import { CoconetService } from '../lib/models/coconet.js';
+    import { CHECKPOINTS } from '../lib/config/constants.js';
+    import { makeScale } from '../lib/models/baseline.js';
+
+    const coco = new CoconetService({
+      checkpointURL: CHECKPOINTS.coconet,
+      stepsPerQuarter: 4,
+      qpm: 120
+    });
+
+    window.addEventListener('DOMContentLoaded', () => {
+      const panel = document.getElementById('modelsPanel');
+
+      // Cantus firmus simple (escala)
+      const bCantus = document.createElement('button');
+      bCantus.textContent = 'Añadir cantus (melodía simple)';
+      bCantus.onclick = () => {
+        const ns = makeScale({ tonic: 60, length: 8, step: 2, dur: 0.5 });
+        App.loadTrack(ns, { name: 'Cantus', program: 0 });
+      };
+
+      // Harmonizar con Coconet
+      const bHarm = document.createElement('button');
+      bHarm.textContent = 'Coconet: Harmonizar (4 voces)';
+      bHarm.onclick = async () => {
+        const st = App.getState();
+        if (!st.current) return alert('Añade/carga una melodía (cantus) primero.');
+        const coral = await coco.harmonize(st.current, { numIterations: 64, temperature: 0.99 });
+        App.replaceMain(coral);
+      };
+
+      panel.append(bCantus, document.createElement('br'), bHarm);
+    });
+  </script>
+</body>
+</html>

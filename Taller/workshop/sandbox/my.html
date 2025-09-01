@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>Sandbox – Magenta Workshop</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- 1) Estilos de la UI genérica -->
+  <link rel="stylesheet" href="../../generic/generic.css" />
+  <!-- 2) Magenta.js (CDN). Si prefieres offline, sirve el UMD local. -->
+  <script src="https://unpkg.com/@magenta/music@1.23.1"></script>
+  <!-- 3) App genérica (expone window.App) -->
+  <script type="module" src="../../generic/generic.js"></script>
+  <!-- 4) Tu código de sandbox (este archivo instancia los modelos) -->
+  <script type="module" src="./my-model.js"></script>
+</head>
+<body>
+  <!-- Mismo layout que generic.html -->
+  <header class="bar">
+    <input id="songTitle" placeholder="Título de la canción" />
+    <div id="transport"></div>
+  </header>
+  <main class="grid">
+    <section class="card">
+      <h3>Melodía / Pistas</h3>
+      <div id="visualizer" class="viz"></div>
+      <div id="tracksPanel"></div>
+    </section>
+    <aside class="card">
+      <h3>Herramientas</h3>
+      <div id="trimPanel"></div>
+      <div id="saveLoadPanel"></div>
+      <hr />
+      <h3>Modelos (Sandbox)</h3>
+      <!-- Aquí tu script añadirá botones -->
+      <div id="modelsPanel"></div>
+    </aside>
+  </main>
+</body>
+</html>

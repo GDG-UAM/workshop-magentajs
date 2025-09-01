@@ -1,0 +1,26 @@
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+body {
+  margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  background: #111; color: #e6e6e6;
+}
+.bar {
+  display: flex; gap: 1rem; align-items: center; padding: .75rem 1rem;
+  border-bottom: 1px solid #222; position: sticky; top: 0; background: #111;
+}
+.bar input { flex: 1; padding: .5rem .75rem; border-radius: .5rem; border: 1px solid #333; background: #0d0d0d; color: #eee; }
+.grid {
+  display: grid; grid-template-columns: 1.5fr .9fr; gap: 1rem; padding: 1rem; max-width: 1200px; margin: 0 auto;
+}
+.card {
+  background: #151515; border: 1px solid #242424; border-radius: .8rem; padding: 1rem;
+  box-shadow: 0 8px 30px rgba(0,0,0,.35);
+}
+.viz svg { width: 100%; height: auto; }
+button {
+  background: #1f6feb; color: #fff; border: 0; padding: .5rem .75rem; border-radius: .5rem; cursor: pointer;
+}
+button:hover { filter: brightness(1.08); }
+label { font-size: .9rem; opacity: .9; margin-right: .5rem; }
+input[type="number"] { width: 6rem; padding: .3rem; background: #0d0d0d; border: 1px solid #333; color:#eee; border-radius:.4rem; }
+hr { border: none; border-top: 1px solid #242424; margin: .8rem 0; }
