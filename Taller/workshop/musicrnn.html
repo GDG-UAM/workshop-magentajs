@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>Workshop – MusicRNN</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="../generic/generic.css" />
+  <script src="https://unpkg.com/@magenta/music@1.23.1"></script>
+  <script type="module" src="../generic/generic.js"></script>
+</head>
+<body>
+  <header class="bar">
+    <input id="songTitle" placeholder="Título de la canción" />
+    <div id="transport"></div>
+  </header>
+  <main class="grid">
+    <section class="card">
+      <h3>Melodía / Pistas</h3>
+      <div id="visualizer" class="viz"></div>
+      <div id="tracksPanel"></div>
+    </section>
+    <aside class="card">
+      <h3>Herramientas</h3>
+      <div id="trimPanel"></div>
+      <div id="saveLoadPanel"></div>
+      <hr />
+      <h3>Modelos</h3>
+      <div id="modelsPanel"></div>
+    </aside>
+  </main>
+
+  <script type="module">
+    import { MusicRnnService } from '../lib/models/musicrnn.js';
+    import { CHECKPOINTS } from '../lib/config/constants.js';
+
+    const rnn = new MusicRnnService({
+      checkpointURL: CHECKPOINTS.musicrnn.melody, // tu URL
+      stepsPerQuarter: 4,
+      qpm: 120
+    });
+
+    window.addEventListener('DOMContentLoaded', () => {
+      const panel = document.getElementById('modelsPanel');
+
+      // Semilla rápida con pitches (C D E F G)
+      const bSeed = document.createElement('button');
+      bSeed.textContent = 'Añadir semilla (C–G)';
+      bSeed.onclick = () => {
+        const seed = rnn.makeSeedFromPitches([60,62,64,65,67], 0.5);
+        App.loadTrack(seed, { name: 'Seed C–G', program: 0 });
+      };
+
+      // Continuar la última “current” como seed
+      const bCont = document.createElement('button');
+      bCont.textContent = 'RNN: Continuar 64 pasos';
+      bCont.onclick = async () => {
+        const st = App.getState();
+        if (!st.current) return alert('Primero añade/carga una melodía (seed).');
+        const cont = await rnn.continue(st.current, { steps: 64, temperature: 1.1, appendSeed: true });
+        App.replaceMain(cont);
+      };
+
+      panel.append(bSeed, document.createElement('br'), bCont);
+    });
+  </script>
+</body>
+</html>

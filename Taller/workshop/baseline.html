@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>Workshop – Baseline (solo notas)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- UI genérica -->
+  <link rel="stylesheet" href="../generic/generic.css" />
+  <!-- Magenta.js -->
+  <script src="https://unpkg.com/@magenta/music@1.23.1"></script>
+  <!-- App genérica -->
+  <script type="module" src="../generic/generic.js"></script>
+</head>
+<body>
+  <!-- Mismo layout que generic.html -->
+  <header class="bar">
+    <input id="songTitle" placeholder="Título de la canción" />
+    <div id="transport"></div>
+  </header>
+  <main class="grid">
+    <section class="card">
+      <h3>Melodía / Pistas</h3>
+      <div id="visualizer" class="viz"></div>
+      <div id="tracksPanel"></div>
+    </section>
+    <aside class="card">
+      <h3>Herramientas</h3>
+      <div id="trimPanel"></div>
+      <div id="saveLoadPanel"></div>
+      <hr />
+      <h3>Modelos</h3>
+      <div id="modelsPanel"></div>
+    </aside>
+  </main>
+
+  <!-- Código del ejemplo -->
+  <script type="module">
+    import { makeScale, makeArpeggio } from '../lib/models/baseline.js';
+
+    window.addEventListener('DOMContentLoaded', () => {
+      const panel = document.getElementById('modelsPanel');
+
+      const b1 = document.createElement('button');
+      b1.textContent = 'Añadir escala (C mayor)';
+      b1.onclick = () => {
+        const ns = makeScale({ tonic: 60, length: 16, step: 2, dur: 0.5, program: 0 });
+        App.loadTrack(ns, { name: 'Escala C', program: 0 });
+      };
+
+      const b2 = document.createElement('button');
+      b2.textContent = 'Añadir arpegio (C-E-G-C)';
+      b2.onclick = () => {
+        const ns = makeArpeggio({ chord: [60, 64, 67, 72], cycles: 4, dur: 0.4, program: 0 });
+        App.loadTrack(ns, { name: 'Arpegio C', program: 0 });
+      };
+
+      panel.append(b1, document.createElement('br'), b2);
+    });
+  </script>
+</body>
+</html>
