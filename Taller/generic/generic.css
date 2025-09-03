@@ -24,3 +24,13 @@ button:hover { filter: brightness(1.08); }
 label { font-size: .9rem; opacity: .9; margin-right: .5rem; }
 input[type="number"] { width: 6rem; padding: .3rem; background: #0d0d0d; border: 1px solid #333; color:#eee; border-radius:.4rem; }
 hr { border: none; border-top: 1px solid #242424; margin: .8rem 0; }
+.concat-tools {
+  background: #fafafa;
+  border: 1px dashed #ddd;
+  padding: 8px;
+  border-radius: 6px;
+  margin-bottom: 10px;
+}
+.concat-tools .row { display: flex; gap: 8px; }
+.track-row.selA { outline: 2px solid #3b82f6; }
+.track-row.selB { outline: 2px solid #f59e0b; }

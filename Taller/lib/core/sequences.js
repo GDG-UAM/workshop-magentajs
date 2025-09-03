@@ -39,10 +39,56 @@ export function merge(seqs) {
   };
 }
 
-// Concatenar secuencias en el tiempo (una detrás de otra)
-export function concatenate(seqs) {
+// Concatenar secuencias en el tiempo (una detrás de otra) asegurando misma cuadrícula
+export function concatenate(seqs, { qpm, spq } = {}) {
   const mm = getMM();
-  return mm.sequences.concatenate(seqs);
+  if (!Array.isArray(seqs) || seqs.length === 0) return { notes: [], totalTime: 0 };
+
+  // Determinar QPM/SPQ de referencia
+  const refQpm = qpm ?? (seqs.find(s => s?.tempos?.length)?.tempos?.[0]?.qpm ?? 120);
+  // Buscar algún SPQ presente en las entradas (no solo el primero)
+  let refSpq = spq ?? null;
+  if (refSpq == null) {
+    for (const s of seqs) {
+      const steps = s?.quantizationInfo?.stepsPerQuarter;
+      if (Number.isInteger(steps) && steps > 0) { refSpq = steps; break; }
+    }
+  }
+
+  // Helper: normalizar a la cuadrícula objetivo
+  const normalize = (ns) => {
+    const copy = mm.sequences.clone(ns);
+    // 1) Asegurar tempo uniforme al inicio
+    copy.tempos = [{ time: 0, qpm: refQpm }];
+
+    const currentSpq = copy.quantizationInfo?.stepsPerQuarter ?? null;
+
+    // Si tenemos refSpq, re-cuantizamos todo a ese valor
+    if (refSpq) {
+      if (currentSpq === refSpq) return copy; // ya está bien
+      // Si estaba cuantizada con otro SPQ, des y re cuantizamos
+      if (currentSpq && currentSpq !== refSpq) {
+        const unq = mm.sequences.unquantizeSequence(copy, refQpm);
+        return mm.sequences.quantizeNoteSequence(unq, refSpq);
+      }
+      // No estaba cuantizada → cuantizar
+      return mm.sequences.quantizeNoteSequence(copy, refSpq);
+    }
+
+  // Si no hay refSpq (ninguna cuantizada), aseguramos no arrastrar quantizationInfo huérfana
+  if (copy.quantizationInfo) delete copy.quantizationInfo;
+  return copy;
+  };
+
+  const normalized = seqs.map(normalize);
+  const out = mm.sequences.concatenate(normalized);
+  out.tempos = [{ time: 0, qpm: refQpm }];
+  if (refSpq) {
+    out.quantizationInfo = { stepsPerQuarter: refSpq };
+  } else {
+    delete out.quantizationInfo;
+  }
+  return out;
 }
 
 // Cuantiza una secuencia a stepsPerQuarter
