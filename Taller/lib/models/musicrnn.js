@@ -52,6 +52,7 @@ async function getMagenta() {
  * @property {number} [qpm=120]           Tempo en negras por minuto (QPM/BPM).
  * @property {string[]} [chordProgression] Progresión de acordes opcional (si el checkpoint lo admite).
  * @property {number} [defaultTemperature=1.1] Temperatura por defecto si no se pasa en continue().
+ * @property {boolean} [forceMonophonic=true] Forzar monofonía (Un sonido a la vez) en la continuación.
  */
 
 /**
@@ -67,6 +68,7 @@ export class MusicRnnService {
     qpm = 120,
     chordProgression = undefined,
     defaultTemperature = 1.1,
+    forceMonophonic = true,
   } = {}) {
     if (!checkpointURL) {
       throw new Error('[MusicRnnService] Falta "checkpointURL".');
@@ -76,6 +78,7 @@ export class MusicRnnService {
     this._qpm = qpm;
     this._chords = chordProgression;
     this._defaultTemp = defaultTemperature;
+    this._forceMonophonic = !!forceMonophonic;
 
     this._mm = null;      // namespace de Magenta
     this._model = null;   // instancia de mm.MusicRNN
@@ -126,6 +129,30 @@ export class MusicRnnService {
   _withTempo(ns, qpm) {
     const copy = this._mm.sequences.clone(ns);
     copy.tempos = [{ time: 0, qpm }];
+    console.log("(musicrnn.js) - Aplicando tempo a MusicRNN");
+    return copy;
+  }
+
+  // Obtiene el rango de pitch del modelo (fallback razonable si no disponible)
+  _getModelPitchRange() {
+    const dc = this._model && (this._model.dataConverter || this._model.checkpointURL?.dataConverter);
+    const min = (dc && (dc.minPitch ?? dc.args?.minPitch)) ?? 36;
+    const max = (dc && (dc.maxPitch ?? dc.args?.maxPitch)) ?? 96;
+    console.log("(musicrnn.js) - Rango de pitch del modelo:", min, max);
+    return { min, max };
+  }
+
+  // Ajustar cada pitch al rango permitido moviendolo por octavas
+  _ensurePitchRange(ns) {
+    const { min, max } = this._getModelPitchRange();
+    const copy = this._mm.sequences.clone(ns);
+
+    copy.notes = copy.notes.map(n => {
+      let p = n.pitch;
+      while (p < min) p+= 12; // Subir octava
+      while (p > max) p-=12; // Bajar octava
+      return {...n, pitch: p};
+    });
     return copy;
   }
 
@@ -139,7 +166,7 @@ export class MusicRnnService {
       return this._mm.sequences.quantizeNoteSequence(ns, this._spq);
     } catch (e) {
       console.warn('[MusicRnnService] No pude cuantizar con SPQ=', this._spq, e);
-      return ns; // no bloquear el taller
+      return ns; // para no bloquear el taller
     }
   }
 
@@ -179,8 +206,9 @@ export class MusicRnnService {
    */
   _prepSeed(ns, qpm) {
     const q = this._quantize(ns);
-    const mono = this._toMonophonic(q);
-    return this._withTempo(mono, qpm);
+    const base = this._forceMonophonic ? this._toMonophonic(q) : q;
+    const inRange = this._ensurePitchRange(base);
+    return this._withTempo(inRange, qpm);
   }
 
   /**
@@ -203,7 +231,7 @@ export class MusicRnnService {
   }
 
   /**
-   * Une "seed + continuation" en una sola NoteSequence (opcional).
+   * Une "seed + continuación" en una sola NoteSequence (opcional).
    * Asume que la continuación arranca en t=0; la offseteamos al final del seed.
    * @param {Object} seedNs
    * @param {Object} contNs
@@ -245,8 +273,8 @@ export class MusicRnnService {
    *
    * @param {Object} seedNs          NoteSequence de entrada (melodía semilla)
    * @param {Object} opts
-   * @param {number} [opts.steps=64] Número de pasos cuantizados a generar
-   * @param {number} [opts.temperature=this._defaultTemp] Aleatoriedad (0..2 aprox)
+   * 
+   * @param {number} [opts.temperature=this._defau@param {number} [opts.steps=64] Número de pasos cuantizados a generarltTemp] Aleatoriedad (0..2 aprox)
    * @param {string[]} [opts.chordProgression=this._chords] Progresión de acordes opcional
    * @param {number} [opts.qpm=this._qpm] Tempo a aplicar para preparar la semilla
    * @param {boolean} [opts.appendSeed=false] Si true, devuelve seed+continuación
@@ -264,25 +292,23 @@ export class MusicRnnService {
     // 1) Preparamos el seed para el modelo
     const seedPrepared = this._prepSeed(seedNs, qpm);
 
-    // 2) Pedimos la continuación al modelo
-    //    Nota: MusicRNN espera "steps" en unidades de cuadrícula (SPQ),
-    //    no en segundos. Asegúrate de que SPQ/QPM sean consistentes en la app.
-    const cont = await this._model.continueSequence(
-      seedPrepared,
-      steps,
-      temperature,
-      chordProgression // opcional: si tu checkpoint soporta acordes
-    );
-
-    // 3) Por defecto devolvemos "solo la continuación"
-    //    Si quieres el resultado unido a la semilla:
-    if (appendSeed) {
-      // Unimos seed + cont desplazando cont al final del seed.
-      return this._mergeSeedAndContinuation(seedPrepared, cont);
+    // 2) Llamamos al modelo
+    let cont;
+    if (chordProgression && chordProgression.length) {
+      cont = await this._model.continueSequence(seedPrepared, steps, temperature, chordProgression);
+    } else {
+      cont = await this._model.continueSequence(seedPrepared, steps, temperature);
     }
 
-    // Aplicamos tempo al cont para reproducción consistente (QoL)
-    return this._withTempo(cont, qpm);
+    // 3) Normalizamos tempo de la salida y por seguridad RANGO
+    const contWithTempo = this._withTempo(cont, qpm);
+    const contInRange = this._ensurePitchRange(contWithTempo);
+
+    // 4) Opcionalmente devolvemos seed + continuación
+    if (appendSeed) {
+      return this._mergeSeedAndContinuation(seedPrepared, contInRange);
+    }
+    return contInRange;
   }
 
   // -------------------------------
