@@ -11,6 +11,17 @@ export function bindTitleInput(selector, state) {
 }
 
 export function buildTransport(selector, player, state) {
+    // Desbloqueo de audio en el primer gesto del usuario
+    (function unlockAudioOnce(){
+      const resume = async () => {
+        try { if (window.Tone?.context?.state !== 'running') await window.Tone.start(); } catch {}
+        window.removeEventListener('pointerdown', resume, true);
+        window.removeEventListener('keydown', resume, true);
+      };
+      window.addEventListener('pointerdown', resume, true);
+      window.addEventListener('keydown', resume, true);
+    })();
+
     const root = document.querySelector(selector);
     root.innerHTML = `
         <button id="btnPlay">▶ Play</button>
@@ -19,15 +30,17 @@ export function buildTransport(selector, player, state) {
     `;
     const btnPlay = root.querySelector('#btnPlay');
     btnPlay.onclick = async () => {
-        if (!state.current) return;
-        if (player.isPlaying()) {
-            player.pause();
-            btnPlay.textContent = '▶ Play';
-        } else {
-            await player.resumeOrStart(state.current, { qpm: state.qpm });
-            btnPlay.textContent = '❚❚ Pause';
-        }
+      if (!state.current) return;
+      if (player.isPlaying()) {
+        player.pause();
+        btnPlay.textContent = '▶ Play';
+      } else {
+        try { if (window.Tone?.context?.state !== 'running') await window.Tone.start(); } catch {}
+        await player.resumeOrStart(state.current, { qpm: state.qpm });
+        btnPlay.textContent = '❚❚ Pause';
+      }
     };
+
     root.querySelector('#btnStop').onclick = () => {
         player.stop();
         btnPlay.textContent = '▶ Play';
@@ -84,6 +97,15 @@ function labelFromIndex(state, idx) {
 }
 
 export function buildTracks(container, state, actions) {
+  const {
+    onMergeTracks,
+    onTrackUpdate,
+    onToggleTrack,
+    onConcatenateTracks,
+    onSelectForConcat,
+    onClearConcatSelection
+  } = actions || {};
+
   const root = document.querySelector(container);
 
   const render = () => {

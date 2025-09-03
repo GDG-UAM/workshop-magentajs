@@ -10,9 +10,9 @@ export const App = (() => {
   // Estado: añadir selección A/B
   const state = {
     title: '',
-    current: null,
+    current: null, // La secuencia de notas que se está reproduciendo o visualizando actualmente. Suele ser una mezcla de las pistas activas.
     original: null,
-    tracks: [],
+    tracks: [], // Un array que almacena todas las pistas de música que se han generado o cargado
     qpm: 120,
     // Selección de pistas (A/B) para acciones de dos pistas
     concatSelection: { a: null, b: null },
@@ -21,6 +21,98 @@ export const App = (() => {
   };
   let player, viz;
 
+  
+
+  function ensureNsMeta(ns) {
+    // Clona ligero
+    const copy = window.mm?.sequences?.clone ? window.mm.sequences.clone(ns)
+                                            : JSON.parse(JSON.stringify(ns));
+
+    // Asegura totalTime en segundos
+    if (copy.totalTime == null) {
+      const maxEnd = (copy.notes || []).reduce((mx, n) => Math.max(mx, n.endTime || 0), 0);
+      copy.totalTime = maxEnd || 0;
+    }
+
+    // Si está cuantizada, asegura totalQuantizedSteps
+    if (copy.quantizationInfo?.stepsPerQuarter && copy.totalQuantizedSteps == null) {
+      const maxStep = (copy.notes || []).reduce((mx, n) => Math.max(mx, n.quantizedEndStep ?? 0), 0);
+      if (maxStep > 0) copy.totalQuantizedSteps = maxStep;
+    }
+    return copy;
+  }
+
+
+  // --- Handlers requeridos por la UI ---
+
+  function onLoadSequence(ns, meta = {}) {
+    const name = meta.name || 'Importado';
+    const program = meta.program ?? 0;
+    const isDrum = !!meta.isDrum;
+    loadTrack(ns, { name, program, isDrum });
+  }
+
+  function onDownload() {
+    // Prepara una NoteSequence con todas las pistas activas (unidas en paralelo)
+    const active = state.tracks
+      .filter(t => t.isActive)
+      .map(t => setInstrument(t.ns, t.program ?? 0, t.isDrum ?? false));
+
+    if (active.length === 0) {
+      alert('No hay pistas activas para descargar.');
+      return;
+    }
+    const ns = active.length === 1 ? active[0] : merge(active);
+    const filename = (state.title?.trim() || 'magenta_sandbox') + '.mid';
+    window.__lib.download(ns, filename);
+  }
+
+  function onToggleTrack(index) {
+    const t = state.tracks[index];
+    if (!t) return;
+    t.isActive = !t.isActive;
+    onTrackUpdate();
+  }
+
+    function onTrackUpdate() {
+      const active = state.tracks
+        .filter(t => t.isActive)
+        .map(t => setInstrument(t.ns, t.program ?? 0, t.isDrum ?? false));
+
+    if (active.length === 0) {
+      try { player.stop(); } catch {}
+      viz.render({ notes: [], totalTime: 0 });
+      state.current = null;
+      return;
+    }
+    const merged = active.length === 1 ? active[0] : merge(active);
+    const ns = ensureNsMeta(merged);       // 👈 garantizamos los campos
+    replaceMain(ns); // hace render + play con QPM actual
+  }
+
+  function onMergeTracks() {
+    const { a, b } = state.concatSelection || {};
+    let idxs = [];
+
+    if (Number.isInteger(a) && Number.isInteger(b) && a !== b) {
+      idxs = [a, b];
+    } else {
+      idxs = state.tracks.map((t, i) => (t.isActive ? i : -1)).filter(i => i >= 0);
+    }
+    if (idxs.length < 2) return;
+
+    const arranged = idxs.map(i => {
+      const t = state.tracks[i];
+      return setInstrument(t.ns, t.program ?? 0, t.isDrum ?? false);
+    });
+
+    const combined = merge(arranged);
+    loadTrack(combined, { name: 'Unión (paralelo)' });
+    state.concatSelection = { a: null, b: null };
+    onTrackUpdate();
+  }
+
+
   function mount() {
     viz = new Roll(document.getElementById('visualizer'));
     player = new LoopingPlayer({ onPosition: (sec) => viz.updateCursor(sec) });
@@ -28,35 +120,69 @@ export const App = (() => {
     bindTitleInput('#songTitle', state);
     buildTransport('#transport', player, state);
     buildTrim('#trimPanel', state, onApplyTrim);
-    buildSaveLoad('#saveLoadPanel', state, onLoadSequence, onDownload);
-    // Pasamos la nueva función onToggleTrack a la UI
-    buildTracks(
-      '#tracksPanel',
+    buildSaveLoad(
+      '#saveLoadPanel',
       state,
+      // onLoadSequence
+      (ns, meta = {}) => {
+        const name = meta.name || 'Importado';
+        const program = meta.program ?? 0;
+        const isDrum = !!meta.isDrum;
+        loadTrack(ns, { name, program, isDrum });
+      },
+      // onDownload
+      () => {
+        const active = state.tracks
+          .filter(t => t.isActive)
+          .map(t => setInstrument(t.ns, t.program ?? 0, t.isDrum ?? false));
+        if (active.length === 0) {
+          alert('No hay pistas activas para descargar.');
+          return;
+        }
+        const out = active.length === 1 ? active[0] : merge(active);
+        const filename = (state.title?.trim() || 'magenta_sandbox') + '.mid';
+        window.__lib.download(out, filename);
+      }
+    );
+
+    // Pasamos la nueva función onToggleTrack a la UI
+    buildTracks('#tracksPanel', state, {
       onMergeTracks,
       onTrackUpdate,
       onToggleTrack,
       onConcatenateTracks,
       onSelectForConcat,
       onClearConcatSelection
-    );
+    });
 
-    window.App = { mount, loadTrack, replaceMain, getState: () => state };
+
+    window.App = {
+      mount,
+      loadTrack,
+      replaceMain,
+      getState: () => state,
+      selectForConcat: onSelectForConcat,
+      clearConcatSelection: onClearConcatSelection,
+      concatLastTwo,
+      concatAB
+    };
+
   }
 
   // --- FUNCIÓN MODIFICADA ---
   function loadTrack(ns, { name = 'Track', program = 0, isDrum = false } = {}) {
-    // Al añadir una pista, la marcamos como activa por defecto
-    state.tracks.push({ ns, name, program, isDrum, isActive: true });
+    state.tracks.push({ ns: ensureNsMeta(ns), name, program, isDrum, isActive: true });
     onTrackUpdate();
   }
+
   
-  function replaceMain(ns) {
+  async function replaceMain(ns) {
     state.current = ns;
     state.original = ns;
     viz.render(ns);
     player.start(ns, { qpm: state.qpm });
   }
+
 
   function onApplyTrim({ startSec, endSec, audition = false, restore = false }) {
     // ... (Esta función no necesita cambios)
@@ -154,7 +280,8 @@ export const App = (() => {
     const ns = concatOnGrid(seqs, { qpm, spq, mm: window.mm });
 
     // Reutiliza loadTrack para añadir la nueva pista
-    loadTrack(ns, { name: label || 'Concatenación' });
+    loadTrack(ensureNsMeta(ns), { name: label || 'Concatenación' });
+
     // loadTrack ya llama a onTrackUpdate()
   }
 
@@ -180,11 +307,12 @@ export const App = (() => {
     onTrackUpdate(true);
   }
 
+  // Por este bloque correcto (alias a las funciones reales):
   const actions = {
     loadTrack,
     replaceMain,
-    selectForConcat,
-    clearConcatSelection,
+    selectForConcat: onSelectForConcat,
+    clearConcatSelection: onClearConcatSelection,
     concatLastTwo,
     concatAB
   };
