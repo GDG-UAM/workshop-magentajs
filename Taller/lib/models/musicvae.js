@@ -148,6 +148,19 @@ export class MusicVaeService {
     return list.map(ns => this._quantize(ns));
   }
 
+  /**
+   * Arregla el tempo y la cuantización de una NoteSequence.
+   * @param {Object} ns  INoteSequence
+   * @returns {Object}   NoteSequence arreglada
+   */
+  _fixTempoAndSPQ(ns) {
+  const out = JSON.parse(JSON.stringify(ns));
+  out.tempos = [{ time: 0, qpm: this._qpm }];
+  out.quantizationInfo = { stepsPerQuarter: this._spq };
+  return out;
+}
+
+
   // -------------------------------
   // API de generación / latente
   // -------------------------------
@@ -233,6 +246,8 @@ export class MusicVaeService {
   getConfig() {
     return { stepsPerQuarter: this._spq, qpm: this._qpm };
   }
+
+  
 }
 
 // ----------------------------------------------------------------------------
