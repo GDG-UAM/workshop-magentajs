@@ -245,6 +245,7 @@ export const App = (() => {
       state.current = trimmedNs;
       viz.render(trimmedNs);
       player.start(trimmedNs, { qpm: state.qpm });
+
       // Añade como nueva pista recortada
       state.tracks.push({ ns: ensureNsMeta(trimmedNs), name: `Recorte ${startSec}s-${endSec}s`, program: false, isDrum: false, isActive: true });
       onTrackUpdate();
@@ -252,13 +253,13 @@ export const App = (() => {
   }
 
   function onConcatenateTracks() {
-    // Usa A+B si están seleccionadas; si no, concatena las activas
+    // Usa A+B si están seleccionadas; si no, concatena todas las activas
     const { a, b } = state.concatSelection || {};
     try {
       if (Number.isInteger(a) && Number.isInteger(b) && a !== b) {
         const nameA = state.tracks[a]?.name || `Track ${a + 1}`;
         const nameB = state.tracks[b]?.name || `Track ${b + 1}`;
-        // Reutiliza el helper que añade una pista nueva
+        // Reutiliza el helper que añade una pista nueva, a,b son índices
         return concatCreateNew([a, b], { label: `Concatenación ${nameA} + ${nameB}` });
       }
       // Fallback: concatenar todas las pistas activas en orden
@@ -339,6 +340,7 @@ export const App = (() => {
     return state.tracks[idx]?.name ?? `Pista ${idx + 1}`;
   }
 
+  // is this being used?
   async function concatLastTwo() {
     if (state.tracks.length < 2) return;
     const idxA = state.tracks.length - 2;
