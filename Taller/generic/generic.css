@@ -1,36 +1,283 @@
-:root { color-scheme: dark; }
+/* ───────────────────────────────────────────────────────────────────────────
+   generic.css — “Google clean light” (responsive)
+   - Modo claro, superficies blancas, sombras suaves
+   - Colores Google solo en detalles (rayitas/acento)
+   - Márgenes y tipografía equilibrados
+   - Responsive real sin cambiar tu HTML
+   ─────────────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* Paleta Google en acentos (baja intensidad) */
+  --g-blue:   #1a73e8;
+  --g-red:    #ea4335;
+  --g-yellow: #fbbc05;
+  --g-green:  #34a853;
+
+  /* Neutros */
+  --bg:        #f7f9fc; /* page */
+  --surface:   #ffffff; /* cards, inputs */
+  --surface-2: #fafbff; /* inputs suaves */
+  --text:      #202124; /* Google-ish neutral */
+  --subtext:   #5f6368;
+  --muted:     #8a9096;
+  --border:    #e4e7ec;
+
+  /* Forma & sombras */
+  --r-xl: 16px; --r-lg: 12px; --r-md: 10px; --r-sm: 8px;
+  --shadow-sm: 0 4px 12px rgba(0,0,0,.06);
+  --shadow-md: 0 10px 24px rgba(0,0,0,.08);
+
+  /* Tipografía y ritmo (fluido) */
+  --fs: clamp(14px, 0.35vw + 13px, 16px);
+  --lh: 1.55;
+  --s-1: 8px; --s-2: 12px; --s-3: 16px; --s-4: 20px; --s-5: 28px; --s-6: 36px;
+
+  --container: 1200px;
+  --gap: clamp(14px, 2vw, 22px);
+  --t: 150ms cubic-bezier(.2,.6,.2,1);
+
+  /* Detalles multicolor sutiles */
+  --brand-stripe: linear-gradient(90deg, var(--g-blue), var(--g-red), var(--g-yellow), var(--g-green));
+  --focus-ring: 0 0 0 3px color-mix(in srgb, var(--g-blue) 20%, transparent);
+}
+
+/* Reset & base */
 * { box-sizing: border-box; }
+html, body { height: 100%; }
 body {
-  margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-  background: #c9c5c5; color: #e6e6e6;
+  margin: 0;
+  font: 500 var(--fs)/var(--lh) Roboto, "Google Sans", system-ui, -apple-system, "Segoe UI", Arial, "Noto Sans", sans-serif;
+  color: var(--text);
+  background:
+    radial-gradient(900px 400px at -10% -10%, color-mix(in srgb, var(--g-blue) 5%, transparent), transparent 60%),
+    radial-gradient(900px 400px at 110% -5%,  color-mix(in srgb, var(--g-green) 4%, transparent), transparent 60%),
+    var(--bg);
+  -webkit-font-smoothing: antialiased;
 }
+
+/* ── Top bar ─────────────────────────────────────────────────────────────── */
 .bar {
-  display: flex; gap: 1rem; align-items: center; padding: .75rem 1rem;
-  border-bottom: 1px solid #222; position: sticky; top: 0; background: #111;
+  position: sticky; top: 0; z-index: 30;
+  display: flex; align-items: center; gap: var(--s-2);
+  padding: var(--s-2) clamp(14px, 2vw, 18px);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
 }
-.bar input { flex: 1; padding: .5rem .75rem; border-radius: .5rem; border: 1px solid #333; background: #0d0d0d; color: #eee; }
+.bar::after {
+  /* Rayita multicolor muy sutil, 2px */
+  content: "";
+  position: absolute; inset: auto 0 0 0; height: 2px; opacity: .25;
+  background: var(--brand-stripe);
+}
+.bar input#songTitle {
+  flex: 1;
+  min-width: 200px;
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  outline: none;
+  transition: border-color var(--t), box-shadow var(--t), background var(--t);
+}
+.bar input#songTitle::placeholder { color: var(--muted); }
+.bar input#songTitle:focus {
+  border-color: color-mix(in srgb, var(--g-blue) 45%, #dbe7ff);
+  box-shadow: var(--focus-ring);
+}
+
+/* ── Layout ─────────────────────────────────────────────────────────────── */
 .grid {
-  display: grid; grid-template-columns: 1.5fr .9fr; gap: 1rem; padding: 1rem; max-width: 1200px; margin: 0 auto;
+  max-width: var(--container);
+  margin: 0 auto;
+  padding: var(--s-5) clamp(14px, 2vw, 24px);
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(280px, 1fr);
+  gap: var(--gap);
 }
+@media (max-width: 980px) { .grid { grid-template-columns: 1fr; padding-top: var(--s-4); } }
+
+/* ── Cards ──────────────────────────────────────────────────────────────── */
 .card {
-  background: #666464; border: 1px solid #242424; border-radius: .8rem; padding: 1rem;
-  box-shadow: 0 8px 30px rgba(0,0,0,.35);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-sm);
+  padding: clamp(14px, 2vw, 20px);
+  transition: box-shadow var(--t), transform var(--t), border-color var(--t);
 }
-.viz svg { width: 100%; height: auto; }
+.card:hover { transform: translateY(-1px); box-shadow: var(--shadow-md); }
+.card > h3 {
+  margin: 0 0 var(--s-2);
+  font-weight: 800; letter-spacing: .2px;
+}
+.card > h3 + .sub { margin-top: -6px; color: var(--subtext); font-size: .95rem; }
+
+/* Subrayado multicolor sutil al principio de cada card */
+.card::before {
+  content: ""; display: block; height: 3px; margin: -4px -4px var(--s-2);
+  border-radius: var(--r-lg) var(--r-lg) 0 0; opacity: .18;
+  background: var(--brand-stripe);
+}
+
+/* ── Visualizador (SVG/Piano Roll) ─────────────────────────────────────── */
+.viz {
+  display: block; width: 100%;
+  background:
+    linear-gradient(180deg, #fff, #fff0),
+    repeating-linear-gradient(to right, #eef1f5 0 1px, transparent 1px 40px);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.7);
+  overflow: hidden; /* evita scrolls raros en móviles */
+}
+.viz svg { display: block; width: 100%; height: auto; }
+
+/* ── Botones: neutrales por defecto, pro y discretos ───────────────────── */
 button {
-  background: #1f6feb; color: #fff; border: 0; padding: .5rem .75rem; border-radius: .5rem; cursor: pointer;
+  appearance: none; -webkit-tap-highlight-color: transparent; cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-weight: 700; letter-spacing: .2px;
+  box-shadow: 0 1px 0 rgba(255,255,255,.6) inset, 0 4px 10px rgba(0,0,0,.04);
+  transition: transform var(--t), box-shadow var(--t), border-color var(--t), background var(--t), color var(--t);
 }
-button:hover { filter: brightness(1.08); }
-label { font-size: .9rem; opacity: .9; margin-right: .5rem; }
-input[type="number"] { width: 6rem; padding: .3rem; background: #666464; border: 1px solid #333; color:#eee; border-radius:.4rem; }
-hr { border: none; border-top: 1px solid #242424; margin: .8rem 0; }
-.concat-tools {
-  background: #fafafa;
-  border: 1px dashed #ddd;
-  padding: 8px;
-  border-radius: 6px;
-  margin-bottom: 10px;
+button:hover { transform: translateY(-1px); box-shadow: 0 8px 20px rgba(0,0,0,.08); }
+button:active { transform: translateY(0); }
+button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+/* Variante primaria: leve tinte + raya inferior multicolor */
+button.primary {
+  background: linear-gradient(#ffffff, #fafbfd);
+  border-color: #dfe5ee;
+  position: relative;
 }
-.concat-tools .row { display: flex; gap: 8px; }
-.track-row.selA { outline: 2px solid #3b82f6; }
-.track-row.selB { outline: 2px solid #f59e0b; }
+button.primary::after {
+  content: ""; position: absolute; left: 10px; right: 10px; bottom: 6px; height: 2px; opacity: .28;
+  background: var(--brand-stripe);
+}
+
+/* Variantes ligeras */
+button.positive { border-color: color-mix(in srgb, var(--g-green) 30%, var(--border)); }
+button.warning  { border-color: color-mix(in srgb, var(--g-yellow) 35%, var(--border)); }
+button.danger   { border-color: color-mix(in srgb, var(--g-red) 35%, var(--border)); color: #9b1c1c; }
+
+/* Grupo transporte */
+#transport { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+#transport #btnStop { background: #fbfbfd; }
+
+/* ── Inputs ─────────────────────────────────────────────────────────────── */
+input[type="text"], input[type="number"], select {
+  padding: 10px 12px;
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  outline: none;
+  transition: border-color var(--t), box-shadow var(--t), background var(--t);
+  min-width: 0; /* para evitar desbordes en grid/flex */
+}
+input::placeholder { color: var(--muted); }
+input:focus, select:focus {
+  border-color: color-mix(in srgb, var(--g-blue) 40%, #dbe7ff);
+  box-shadow: var(--focus-ring);
+}
+
+input[type="file"] {
+  padding: 10px;
+  background: var(--surface);
+  border: 1px dashed var(--border);
+  border-radius: var(--r-lg);
+  color: var(--subtext);
+}
+input[type="file"]::file-selector-button {
+  margin-right: 10px; border: 1px solid var(--border);
+  background: var(--surface-2); color: var(--text);
+  padding: 8px 12px; border-radius: var(--r-sm);
+  cursor: pointer; transition: transform var(--t);
+}
+input[type="file"]::file-selector-button:hover { transform: translateY(-1px); }
+
+input[type="checkbox"], input[type="radio"] { accent-color: var(--g-blue); }
+label { font-size: .95rem; color: var(--subtext); margin-right: .5rem; }
+
+/* ── Paneles (Trim / SaveLoad / Models / Tracks / Concat) ──────────────── */
+#trimPanel, #saveLoadPanel, #modelsPanel, #tracksPanel, #concatUI { display: grid; gap: var(--s-2); }
+#concatUI {
+  background: #f5f8ff; border: 1px dashed #dfe7ff; border-radius: var(--r-lg);
+  padding: var(--s-3);
+}
+#tracksPanel strong { color: var(--subtext); }
+#tracksList { display: grid; gap: var(--s-1); }
+#tracksList input.name { min-width: 12rem; width: clamp(10rem, 30vw, 18rem); }
+
+/* Chips / badges discretos con borde multicolor */
+.badge, #concatUI em {
+  font-style: normal;
+  display: inline-flex; align-items: center; gap: .5ch;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #fff;
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: 0 1px 0 rgba(255,255,255,.7) inset;
+}
+.badge::before, #concatUI em::before {
+  content: ""; width: 8px; height: 8px; border-radius: 50%; display: inline-block; opacity: .55;
+  background: var(--brand-stripe);
+}
+
+/* Divisores y utilidades */
+hr { border: none; height: 1px; margin: var(--s-3) 0; background: linear-gradient(90deg, transparent, var(--border), transparent); }
+.hidden { display: none !important; }
+.muted  { color: var(--muted); }
+
+/* ───────────────────────────── Responsive extras ───────────────────────── */
+
+/* 1) Portátiles medianos: reduce levemente el padding y el gap */
+@media (max-width: 1200px) {
+  :root { --container: 1040px; }
+  .grid { gap: clamp(12px, 1.6vw, 18px); }
+}
+
+/* 2) Tablets: la bar se vuelve flexible y el título ocupa línea completa */
+@media (max-width: 900px) {
+  .bar { flex-wrap: wrap; align-items: stretch; row-gap: var(--s-2); }
+  .bar input#songTitle { order: 2; width: 100%; }
+  .bar > *:not(#songTitle) { order: 1; }
+}
+
+/* 3) Móviles: todo a una columna cómoda y controles grandes */
+@media (max-width: 720px) {
+  /* grid ya colapsa a 1fr en 980px; ajustamos paddings */
+  .grid { padding: var(--s-4) clamp(12px, 4vw, 20px); gap: clamp(12px, 3.5vw, 18px); }
+  .card { border-radius: var(--r-lg); }
+
+  /* Top bar más compacta y con raya más fina */
+  .bar { padding: var(--s-2) clamp(12px, 4vw, 18px); }
+  .bar::after { height: 1px; opacity: .22; }
+
+  /* Botones del transporte: 2 por fila, luego 1 (ver 420px) */
+  #transport button { flex: 1 1 calc(50% - var(--s-2)); min-width: 140px; }
+}
+
+/* 4) Móviles pequeños */
+@media (max-width: 480px) {
+  :root { --r-xl: 14px; --r-lg: 10px; }
+  .grid { padding: var(--s-3) clamp(10px, 4vw, 16px); }
+  .bar::after { opacity: .18; }
+  #transport button { flex-basis: 100%; min-width: 0; }
+  .viz { border-radius: var(--r-md); }
+}
+
+/* 5) Controles táctiles: más área de toque y tipografía un pelín mayor */
+@media (pointer: coarse) {
+  button { padding: 12px 16px; }
+  input[type="text"], input[type="number"], select { padding: 12px 14px; }
+}
+
+/* Accesibilidad: reduce motion */
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
