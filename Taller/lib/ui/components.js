@@ -23,11 +23,10 @@ export function buildTransport(selector, player, state) {
     })();
 
     const root = document.querySelector(selector);
-    root.innerHTML = `
-        <button id="btnPlay">▶ Play</button>
-        <button id="btnStop">■ Stop</button>
-        <label>QPM <input id="qpm" type="number" value="${state.qpm}" min="40" max="220" step="1"></label>
-    `;
+  root.innerHTML = `
+    <button id="btnPlay">▶ Play</button>
+    <button id="btnStop">■ Stop</button>
+  `;
     const btnPlay = root.querySelector('#btnPlay');
     btnPlay.onclick = async () => {
       if (!state.current) return;
@@ -44,10 +43,6 @@ export function buildTransport(selector, player, state) {
     root.querySelector('#btnStop').onclick = () => {
         player.stop();
         btnPlay.textContent = '▶ Play';
-    };
-    root.querySelector('#qpm').oninput = (e) => {
-        state.qpm = +e.target.value;
-        player.setQpm(state.qpm);
     };
 }
 
