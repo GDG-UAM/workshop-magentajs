@@ -5,38 +5,68 @@ function getMM() {
   throw new Error('[sequences] Magenta no está disponible.');
 }
 
+// --- NUEVO: asegura totalTime y totalQuantizedSteps ---
+function ensureMeta(ns) {
+  // Clonado ligero para no mutar la entrada
+  const out = (window.mm?.sequences?.clone)
+    ? window.mm.sequences.clone(ns)
+    : JSON.parse(JSON.stringify(ns));
+
+  const notes = out.notes || [];
+
+  // Asegura totalTime en segundos
+  if (out.totalTime == null || out.totalTime === 0) {
+    const maxEnd = notes.reduce((mx, n) => Math.max(mx, n.endTime || 0), 0);
+    out.totalTime = Math.max(out.totalTime || 0, maxEnd);
+  }
+
+  // Si está cuantizada, asegura totalQuantizedSteps
+  const spq = out.quantizationInfo?.stepsPerQuarter;
+  if (spq && (out.totalQuantizedSteps == null || out.totalQuantizedSteps === 0)) {
+    const maxQ = notes.reduce((mx, n) => Math.max(mx, n.quantizedEndStep ?? 0), 0);
+    if (maxQ > 0) out.totalQuantizedSteps = maxQ;
+  }
+
+  return out;
+}
+
 // Recorta por segundos [startSec, endSec)
 export function trim(ns, startSec, endSec) {
   const mm = getMM();
-  return mm.sequences.trim(ns, startSec, endSec);
+  return ensureMeta(mm.sequences.trim(ns, startSec, endSec));
 }
 
 // Asigna instrumento/program y modo drum a todas las notas
 export function setInstrument(ns, program = 0, isDrum = false) {
   const mm = getMM();
   const out = mm.sequences.clone(ns);
-  out.notes.forEach(n => { n.program = program; n.isDrum = isDrum; });
-  return out;
+  (out.notes || []).forEach(n => { n.program = program; n.isDrum = isDrum; });
+  return ensureMeta(out);
 }
 
-// LÍNEA CORRECTA
+// Une en paralelo (todas las notas a la vez)
 export function merge(seqs) {
   if (!seqs || !seqs.length) return { notes: [], totalTime: 0 };
 
-  // Combina todas las notas de todas las secuencias en una sola lista.
-  const allNotes = [].concat(...seqs.map(s => s.notes));
+  // Copiamos notas (sin mutar originales)
+  const allNotes = [];
+  for (const s of seqs) {
+    if (s?.notes) allNotes.push(...s.notes.map(n => ({ ...n })));
+  }
 
-  // Calcula el tiempo total como el máximo "endTime" de todas las notas.
-  const totalTime = allNotes.reduce((max, note) => Math.max(max, note.endTime), 0);
+  // Reusamos tempo/spq de la primera que lo tenga
+  const firstWithTempo = seqs.find(s => s?.tempos?.length);
+  const firstWithSpq   = seqs.find(s => s?.quantizationInfo?.stepsPerQuarter);
 
-  // Devuelve una nueva secuencia que contiene todas las notas.
-  // Copiamos la información de tempo de la primera secuencia como referencia.
-  return {
+  const out = {
     notes: allNotes,
-    totalTime: totalTime,
-    tempos: seqs[0].tempos,
-    quantizationInfo: seqs[0].quantizationInfo
+    tempos: firstWithTempo?.tempos || [{ time: 0, qpm: 120 }],
+    ...(firstWithSpq
+      ? { quantizationInfo: { stepsPerQuarter: firstWithSpq.quantizationInfo.stepsPerQuarter } }
+      : {})
   };
+
+  return ensureMeta(out);
 }
 
 // Concatenar secuencias en el tiempo (una detrás de otra) asegurando misma cuadrícula
@@ -46,7 +76,6 @@ export function concatenate(seqs, { qpm, spq } = {}) {
 
   // Determinar QPM/SPQ de referencia
   const refQpm = qpm ?? (seqs.find(s => s?.tempos?.length)?.tempos?.[0]?.qpm ?? 120);
-  // Buscar algún SPQ presente en las entradas (no solo el primero)
   let refSpq = spq ?? null;
   if (refSpq == null) {
     for (const s of seqs) {
@@ -55,58 +84,45 @@ export function concatenate(seqs, { qpm, spq } = {}) {
     }
   }
 
-  // Helper: normalizar a la cuadrícula objetivo
+  // Normalizar a la cuadrícula objetivo
   const normalize = (ns) => {
     const copy = mm.sequences.clone(ns);
-    // 1) Asegurar tempo uniforme al inicio
     copy.tempos = [{ time: 0, qpm: refQpm }];
 
     const currentSpq = copy.quantizationInfo?.stepsPerQuarter ?? null;
-
-    // Si tenemos refSpq, re-cuantizamos todo a ese valor
     if (refSpq) {
-      if (currentSpq === refSpq) return copy; // ya está bien
-      // Si estaba cuantizada con otro SPQ, des y re cuantizamos
+      if (currentSpq === refSpq) return copy;
       if (currentSpq && currentSpq !== refSpq) {
         const unq = mm.sequences.unquantizeSequence(copy, refQpm);
         return mm.sequences.quantizeNoteSequence(unq, refSpq);
       }
-      // No estaba cuantizada → cuantizar
       return mm.sequences.quantizeNoteSequence(copy, refSpq);
     }
-
-  // Si no hay refSpq (ninguna cuantizada), aseguramos no arrastrar quantizationInfo huérfana
-  if (copy.quantizationInfo) delete copy.quantizationInfo;
-  return copy;
+    if (copy.quantizationInfo) delete copy.quantizationInfo;
+    return copy;
   };
 
   const normalized = seqs.map(normalize);
   const out = mm.sequences.concatenate(normalized);
   out.tempos = [{ time: 0, qpm: refQpm }];
-  if (refSpq) {
-    out.quantizationInfo = { stepsPerQuarter: refSpq };
-  } else {
-    delete out.quantizationInfo;
-  }
-  return out;
+  if (refSpq) out.quantizationInfo = { stepsPerQuarter: refSpq };
+  else delete out.quantizationInfo;
+
+  return ensureMeta(out);
 }
 
 // Cuantiza una secuencia a stepsPerQuarter
 export function quantize(ns, stepsPerQuarter = 4) {
   const mm = getMM();
-  return mm.sequences.quantizeNoteSequence(ns, stepsPerQuarter);
+  const q = mm.sequences.quantizeNoteSequence(ns, stepsPerQuarter);
+  return ensureMeta(q);
 }
 
 /* ---------- Helper para la UI genérica ----------
    Recoge state.tracks (cada uno con ns, program, isDrum) y devuelve un merged.
 */
 export function mergeFromState(state) {
-  // 1. Filtramos para quedarnos solo con las pistas activas
   const activeTracks = state.tracks.filter(t => t.isActive);
-  
-  // 2. Aplicamos el instrumento y programa a cada pista activa
   const arranged = activeTracks.map(t => setInstrument(t.ns, t.program ?? 0, t.isDrum ?? false));
-  
-  // 3. Unimos solo las pistas que han sido arregladas
-  return merge(arranged);
+  return ensureMeta(merge(arranged));
 }

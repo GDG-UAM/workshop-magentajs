@@ -21,7 +21,36 @@ export const App = (() => {
   };
   let player, viz;
 
-  
+  function toUniformGrid(seqs) {
+    // Si alguna secuencia está cuantizada, usamos su SPQ como referencia
+    let spq = null;
+    for (const s of seqs) {
+      const steps = s?.quantizationInfo?.stepsPerQuarter;
+      if (Number.isInteger(steps) && steps > 0) { spq = steps; break; }
+    }
+    if (!spq) return seqs; // ninguna cuantizada → no tocamos nada
+
+    const mm = window.mm;
+    const qpmFallback = (seqs.find(s => s?.tempos?.length)?.tempos?.[0]?.qpm) ?? 120;
+
+    return seqs.map(s => {
+      const cur = s?.quantizationInfo?.stepsPerQuarter;
+      try {
+        if (!cur) {
+          // no cuantizada → cuantizar directo
+          return window.__lib.quantize(s, spq);
+        }
+        if (cur === spq) return s; // ya ok
+        // distinta cuadrícula → des-cuantizar y re-cuantizar
+        const qpm = s?.tempos?.[0]?.qpm ?? qpmFallback;
+        const unq = mm.sequences.unquantizeSequence(s, qpm);
+        return mm.sequences.quantizeNoteSequence(unq, spq);
+      } catch {
+        return s; // ante cualquier error, no romper
+      }
+    });
+  }
+
 
   function ensureNsMeta(ns) {
     // Clona ligero
@@ -75,7 +104,7 @@ export const App = (() => {
   }
 
     function onTrackUpdate() {
-      const active = state.tracks
+      let active = state.tracks
         .filter(t => t.isActive)
         .map(t => setInstrument(t.ns, t.program ?? 0, t.isDrum ?? false));
 
@@ -85,6 +114,8 @@ export const App = (() => {
       state.current = null;
       return;
     }
+
+    active = toUniformGrid(active);                 // 👈 unificar SPQ si aplica
     const merged = active.length === 1 ? active[0] : merge(active);
     const ns = ensureNsMeta(merged);       // 👈 garantizamos los campos
     replaceMain(ns); // hace render + play con QPM actual
