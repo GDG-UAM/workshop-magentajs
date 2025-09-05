@@ -6,21 +6,30 @@ import { buildTransport, buildTrim, buildSaveLoad, buildTracks, bindTitleInput }
 import { mergeFromState, concatenate, merge, setInstrument } from '../lib/core/sequences.js';
 import { concatOnGrid } from '../lib/core/concat.js';
 
+// SPQ (Steps Per Quarter) = número de subdivisiones (steps) en una negra.
+// QPM (Quarter notes Per Minute) = número de negras por minuto (tempo).
+
 export const App = (() => {
   // Estado: añadir selección A/B
   const state = {
     title: '',
+    // current/original: lo que se está mostrando/reproduciendo ahora y la copia base (para restaurar tras un trim).
+    // Trim = recortar un fragmento temporal de una NoteSequence, usando un rango [startSec, endSec).
     current: null, // La secuencia de notas que se está reproduciendo o visualizando actualmente. Suele ser una mezcla de las pistas activas.
     original: null,
-    tracks: [], // Un array que almacena todas las pistas de música que se han generado o cargado
+    tracks: [], // Un array que almacena todas las pistas de música que se han generado o cargado 
+    // track = [{ ns, name, program, isDrum, isActive }]
     qpm: 120,
     // Selección de pistas (A/B) para acciones de dos pistas
     concatSelection: { a: null, b: null },
     // Si true, al seleccionar A y B se unirá en paralelo automáticamente
     mergeAwaiting: false
   };
+
+  // Son singletons: player, viz. Esto significa que solo hay una instancia de cada uno en toda la aplicación (un único reproductor y un único visualizador coordinados).
   let player, viz;
 
+  // Normalizacion de cuadrícula
   function toUniformGrid(seqs) {
     // Si alguna secuencia está cuantizada, usamos su SPQ como referencia
     let spq = null;
@@ -34,6 +43,7 @@ export const App = (() => {
     const qpmFallback = (seqs.find(s => s?.tempos?.length)?.tempos?.[0]?.qpm) ?? 120;
 
     return seqs.map(s => {
+      // cur = SPQ actual de s (si existe).
       const cur = s?.quantizationInfo?.stepsPerQuarter;
       try {
         if (!cur) {
@@ -59,6 +69,7 @@ export const App = (() => {
 
     // Asegura totalTime en segundos
     if (copy.totalTime == null) {
+      // Esta línea busca el mayor valor de endTime en todas las notas de una secuencia,  útil para saber cuánto dura la secuencia musical en segundos.
       const maxEnd = (copy.notes || []).reduce((mx, n) => Math.max(mx, n.endTime || 0), 0);
       copy.totalTime = maxEnd || 0;
     }
@@ -91,14 +102,17 @@ export const App = (() => {
       alert('No hay pistas activas para descargar.');
       return;
     }
+    // Si solo hay una pista activa, la usa tal cual.
+    // Si hay varias, las une en paralelo usando la función merge.
     const ns = active.length === 1 ? active[0] : merge(active);
     const filename = (state.title?.trim() || 'magenta_sandbox') + '.mid';
     window.__lib.download(ns, filename);
   }
 
   function onToggleTrack(index) {
+    // Permite activar o desactivar una pista musical en la lista de pistas de la aplicación. Es decir, alterna el estado de una pista entre "activa" y "inactiva".
     const t = state.tracks[index]; // Obtener la pista correspondiente
-    if (!t) return;
+    if (!t) return; // Si no existe la pista (por ejemplo, el índice es incorrecto), termina la función y no hace nada.
     t.isActive = !t.isActive;
     onTrackUpdate();
   }
@@ -108,7 +122,7 @@ export const App = (() => {
     - Si hay pistas activas, garantiza los metadatos y llama a replaceMain()
     para reproducir y visualizar
   */
-    function onTrackUpdate() {
+  function onTrackUpdate() {
       let active = state.tracks
         .filter(t => t.isActive)
         .map(t => setInstrument(t.ns, t.program ?? 0, t.isDrum ?? false));
@@ -128,7 +142,7 @@ export const App = (() => {
 
   /*
     Une las pistas seleccionadas A y B en paralelo, creando una nueva pista.
-    Si no hay A y B seleccionadas, une todas las pistas activas. <- (Jose): No es cierto, no hace nada
+    Si no hay A y B seleccionadas, une todas las pistas activas. <- (Jose): No es cierto, no hace nada // TO DO 
     Si hay menos de 2 pistas para unir, no hace nada.
   */
   function onMergeTracks() {
@@ -147,6 +161,10 @@ export const App = (() => {
       return setInstrument(t.ns, t.program ?? 0, t.isDrum ?? false);
     });
 
+    // Ejemplo:
+    // idxs = [0, 2] (índices de pistas activas)
+    // arranged = [setInstrument(pista0), setInstrument(pista2)]
+
     const combined = merge(arranged); // Une en paralelo
     loadTrack(combined, { name: 'Unión (paralelo)' });
     state.concatSelection = { a: null, b: null };
@@ -154,6 +172,13 @@ export const App = (() => {
   }
 
   // --- Funciones principales expuestas en App ---
+  /*
+  La función mount:
+      - Inicializa el visualizador y el reproductor.
+      - Construye todos los paneles y controles de la interfaz.
+      - Enlaza los handlers para que la UI responda a las acciones del usuario.
+      - Expone las funciones principales para su uso global.
+  */
   // Monta la UI y enlaza los handlers
   function mount() {
     viz = new Roll(document.getElementById('visualizer')); // objeto visualizador
@@ -164,10 +189,10 @@ export const App = (() => {
     bindTitleInput('#songTitle', state); // título editable de cada melodía
     buildTransport('#transport', player, state); // play, pause, stop, tempo
     buildTrim('#trimPanel', state, onApplyTrim); // recortar melodía
-    buildSaveLoad( // importar/exportar MIDI (NO FUNCIONA)
+    buildSaveLoad( // importar/exportar MIDI (NO FUNCIONA) // TO DO 
       '#saveLoadPanel',
       state,
-      // onLoadSequence
+      // onLoadSequence: Añade una pista nueva al cargar un archivo.
       (ns, meta = {}) => {
         const name = meta.name || 'Importado';
         const program = meta.program ?? 0;
@@ -189,6 +214,9 @@ export const App = (() => {
       }
     );
 
+    //TO DO: Estas funciones las de arriba (onLoadSequence y onDownload) existen ya en este archivo, no es necesario volver a definirlas aquí.)
+
+    // Panel de pistas: lista, activar/desactivar, seleccionar A/B, unir, concatenar
     buildTracks('#tracksPanel', state, {
       onMergeTracks,
       onTrackUpdate,
