@@ -216,7 +216,7 @@ export const App = (() => {
 
     //TO DO: Estas funciones las de arriba (onLoadSequence y onDownload) existen ya en este archivo, no es necesario volver a definirlas aquí.)
 
-    // Panel de pistas: lista, activar/desactivar, seleccionar A/B, unir, concatenar
+    // 
     buildTracks('#tracksPanel', state, {
       onMergeTracks,
       onTrackUpdate,
