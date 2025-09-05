@@ -97,12 +97,17 @@ export const App = (() => {
   }
 
   function onToggleTrack(index) {
-    const t = state.tracks[index];
+    const t = state.tracks[index]; // Obtener la pista correspondiente
     if (!t) return;
     t.isActive = !t.isActive;
     onTrackUpdate();
   }
 
+  /* Actualiza la pista activa
+    - Si no hay pistas activas, detiene la reproducción y limpia el visualizador
+    - Si hay pistas activas, garantiza los metadatos y llama a replaceMain()
+    para reproducir y visualizar
+  */
     function onTrackUpdate() {
       let active = state.tracks
         .filter(t => t.isActive)
@@ -110,17 +115,22 @@ export const App = (() => {
 
     if (active.length === 0) {
       try { player.stop(); } catch {}
-      viz.render({ notes: [], totalTime: 0 });
+      viz.render({ notes: [], totalTime: 0 }); // limpia el visualizador
       state.current = null;
       return;
     }
 
-    active = toUniformGrid(active);                 // 👈 unificar SPQ si aplica
+    active = toUniformGrid(active); // unificar SPQ si aplica
     const merged = active.length === 1 ? active[0] : merge(active);
-    const ns = ensureNsMeta(merged);       // 👈 garantizamos los campos
+    const ns = ensureNsMeta(merged); // garantizamos los campos
     replaceMain(ns); // hace render + play con QPM actual
   }
 
+  /*
+    Une las pistas seleccionadas A y B en paralelo, creando una nueva pista.
+    Si no hay A y B seleccionadas, une todas las pistas activas. <- (Jose): No es cierto, no hace nada
+    Si hay menos de 2 pistas para unir, no hace nada.
+  */
   function onMergeTracks() {
     const { a, b } = state.concatSelection || {};
     let idxs = [];
@@ -137,21 +147,24 @@ export const App = (() => {
       return setInstrument(t.ns, t.program ?? 0, t.isDrum ?? false);
     });
 
-    const combined = merge(arranged);
+    const combined = merge(arranged); // Une en paralelo
     loadTrack(combined, { name: 'Unión (paralelo)' });
     state.concatSelection = { a: null, b: null };
     onTrackUpdate();
   }
 
-
+  // --- Funciones principales expuestas en App ---
+  // Monta la UI y enlaza los handlers
   function mount() {
-    viz = new Roll(document.getElementById('visualizer'));
+    viz = new Roll(document.getElementById('visualizer')); // objeto visualizador
+    // viz.resize(); // ajusta al tamaño del contenedor
     player = new LoopingPlayer({ onPosition: (sec) => viz.updateCursor(sec) });
 
-    bindTitleInput('#songTitle', state);
-    buildTransport('#transport', player, state);
-    buildTrim('#trimPanel', state, onApplyTrim);
-    buildSaveLoad(
+    // Construye los componentes de la UI (components.js)
+    bindTitleInput('#songTitle', state); // título editable de cada melodía
+    buildTransport('#transport', player, state); // play, pause, stop, tempo
+    buildTrim('#trimPanel', state, onApplyTrim); // recortar melodía
+    buildSaveLoad( // importar/exportar MIDI (NO FUNCIONA)
       '#saveLoadPanel',
       state,
       // onLoadSequence
@@ -176,7 +189,6 @@ export const App = (() => {
       }
     );
 
-    // Pasamos la nueva función onToggleTrack a la UI
     buildTracks('#tracksPanel', state, {
       onMergeTracks,
       onTrackUpdate,
@@ -187,7 +199,7 @@ export const App = (() => {
     });
 
 
-    window.App = {
+    window.App = { // Funciones expuestas en la aplicación
       mount,
       loadTrack,
       replaceMain,
@@ -200,13 +212,16 @@ export const App = (() => {
 
   }
 
-  // --- FUNCIÓN MODIFICADA ---
   function loadTrack(ns, { name = 'Track', program = 0, isDrum = false } = {}) {
     state.tracks.push({ ns: ensureNsMeta(ns), name, program, isDrum, isActive: true });
     onTrackUpdate();
   }
 
-  
+  /*
+    Reemplaza la melodía principal (current + original) por ns,
+    actualizando visualizador y reproductor.
+    Si ns es null, no hace nada.
+  */
   async function replaceMain(ns) {
     state.current = ns;
     state.original = ns;
@@ -216,7 +231,6 @@ export const App = (() => {
 
 
   function onApplyTrim({ startSec, endSec, audition = false, restore = false }) {
-    // ... (Esta función no necesita cambios)
     if (restore) {
       if (state.original) replaceMain(state.original);
       return;
@@ -231,6 +245,9 @@ export const App = (() => {
       state.current = trimmedNs;
       viz.render(trimmedNs);
       player.start(trimmedNs, { qpm: state.qpm });
+      // Añade como nueva pista recortada
+      state.tracks.push({ ns: ensureNsMeta(trimmedNs), name: `Recorte ${startSec}s-${endSec}s`, program: false, isDrum: false, isActive: true });
+      onTrackUpdate();
     }
   }
 
