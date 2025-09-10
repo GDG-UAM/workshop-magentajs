@@ -61,26 +61,40 @@ export const App = (() => {
     });
   }
 
+function ensureNsMeta(ns) {
+  const copy = window.mm?.sequences?.clone
+    ? window.mm.sequences.clone(ns)
+    : JSON.parse(JSON.stringify(ns));
 
-  function ensureNsMeta(ns) {
-    // Clona ligero
-    const copy = window.mm?.sequences?.clone ? window.mm.sequences.clone(ns)
-                                            : JSON.parse(JSON.stringify(ns));
+  const notes = copy.notes || [];
 
-    // Asegura totalTime en segundos
-    if (copy.totalTime == null) {
-      // Esta línea busca el mayor valor de endTime en todas las notas de una secuencia,  útil para saber cuánto dura la secuencia musical en segundos.
-      const maxEnd = (copy.notes || []).reduce((mx, n) => Math.max(mx, n.endTime || 0), 0);
-      copy.totalTime = maxEnd || 0;
-    }
-
-    // Si está cuantizada, asegura totalQuantizedSteps
-    if (copy.quantizationInfo?.stepsPerQuarter && copy.totalQuantizedSteps == null) {
-      const maxStep = (copy.notes || []).reduce((mx, n) => Math.max(mx, n.quantizedEndStep ?? 0), 0);
-      if (maxStep > 0) copy.totalQuantizedSteps = maxStep;
-    }
-    return copy;
+  // 1) totalTime (si hay tiempos en segundos)
+  if (copy.totalTime == null) {
+    const maxEnd = notes.reduce((mx, n) => Math.max(mx, n.endTime ?? 0), 0);
+    if (maxEnd > 0) copy.totalTime = maxEnd;
   }
+
+  // 2) totalQuantizedSteps (aunque falte quantizationInfo)
+  const maxQStep = notes.reduce(
+    (mx, n) => Math.max(mx, n.quantizedEndStep ?? n.quantizedStartStep ?? 0),
+    0
+  );
+  if (maxQStep > 0 && copy.totalQuantizedSteps == null) {
+    copy.totalQuantizedSteps = maxQStep;
+    // Asegura quantizationInfo si falta (SPQ por defecto = 4)
+    if (!copy.quantizationInfo || !copy.quantizationInfo.stepsPerQuarter) {
+      copy.quantizationInfo = { stepsPerQuarter: 4 };
+    }
+  }
+
+  // 3) tempos mínimo
+  if (!copy.tempos || copy.tempos.length === 0) {
+    copy.tempos = [{ time: 0, qpm: 120 }];
+  }
+
+  return copy;
+}
+
 
 
   // --- Handlers requeridos por la UI ---

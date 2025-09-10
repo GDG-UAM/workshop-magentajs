@@ -228,7 +228,7 @@ export class CoconetService {
     const inferOpts = { numIterations, temperature, numSamples };
     if (opts.masks) inferOpts.masks = opts.masks; // passthrough si se usan
 
-    const out = await this._model.infer(template, inferOpts);
+    const out = await this._model.infill(template, inferOpts);
 
     // 3) Ajuste de tempo (si aplica) y salida final
     out.tempos = out.tempos && out.tempos.length
@@ -263,7 +263,7 @@ export class CoconetService {
     const inferOpts = { numIterations, temperature, numSamples };
     if (mask) inferOpts.masks = [mask];
 
-    const out = await this._model.infer(q, inferOpts);
+    const out = await this._model.infill(q, inferOpts);
     out.tempos = out.tempos && out.tempos.length
       ? out.tempos
       : [{ time: 0, qpm: this._qpm }];
