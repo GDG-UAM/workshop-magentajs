@@ -181,25 +181,35 @@ export const App = (() => {
   */
   // Monta la UI y enlaza los handlers
   function mount() {
-    viz = new Roll(document.getElementById('visualizer')); // objeto visualizador
-    // viz.resize(); // ajusta al tamaño del contenedor
-    player = new LoopingPlayer({ onPosition: (sec) => viz.updateCursor(sec) });
+    // 1) Crear VISUALIZADOR (piano-roll en el <svg id="visualizer">)
+    viz = new Roll(document.getElementById('visualizer'));
 
-    // Construye los componentes de la UI (components.js)
-    bindTitleInput('#songTitle', state); // título editable de cada melodía
-    buildTransport('#transport', player, state); // play, pause, stop, tempo
-    buildTrim('#trimPanel', state, onApplyTrim); // recortar melodía
-    buildSaveLoad( // importar/exportar MIDI (NO FUNCIONA) // TO DO 
+    // 2) Crear PLAYER (reproductor) y sincronizar el cursor del roll con el tiempo
+    player = new LoopingPlayer({
+      onPosition: (sec) => viz.updateCursor(sec)
+    });
+
+    // 3) Enlazar el título de la canción al estado (two-way-ish)
+    bindTitleInput('#songTitle', state);
+
+    // 4) Construir los controles de transporte (Play/Pause/Loop, etc.)
+    buildTransport('#transport', player, state);
+
+    // 5) Construir el panel de recorte (Trim)
+    buildTrim('#trimPanel', state, onApplyTrim);
+
+    // 6) Construir panel Guardar/Cargar (.mid) con handlers
+    buildSaveLoad(
       '#saveLoadPanel',
       state,
-      // onLoadSequence: Añade una pista nueva al cargar un archivo.
+      // onLoadSequence (cuando el usuario carga un .mid)
       (ns, meta = {}) => {
         const name = meta.name || 'Importado';
         const program = meta.program ?? 0;
         const isDrum = !!meta.isDrum;
         loadTrack(ns, { name, program, isDrum });
       },
-      // onDownload
+      // onDownload (cuando el usuario pulsa "Descargar")
       () => {
         const active = state.tracks
           .filter(t => t.isActive)
@@ -214,32 +224,36 @@ export const App = (() => {
       }
     );
 
-    //TO DO: Estas funciones las de arriba (onLoadSequence y onDownload) existen ya en este archivo, no es necesario volver a definirlas aquí.)
+    //TO DO: Estas funciones las de arriba (onLoadSequence y onDownload) existen ya en este archivo, no es necesario volver a definirlas aquí.
 
-    // 
+
+    // 7) Construir el panel de Pistas (lista, toggles, acciones)
     buildTracks('#tracksPanel', state, {
-      onMergeTracks,
-      onTrackUpdate,
-      onToggleTrack,
-      onConcatenateTracks,
-      onSelectForConcat,
-      onClearConcatSelection
+      onMergeTracks,          // Une en paralelo A+B (o activas)
+      onTrackUpdate,          // Recalcula mezcla/visual y reproduce
+      onToggleTrack,          // Activa/desactiva una pista
+      onConcatenateTracks,    // Concatena temporalmente (A→B)
+      onSelectForConcat,      // Marca A o B al pulsar un botón
+      onClearConcatSelection  // Limpia la selección A/B
     });
 
-
-    window.App = { // Funciones expuestas en la aplicación
+    // 8) Exponer la FACHADA GLOBAL para que otros scripts (my-model.js) la usen
+    window.App = {
       mount,
-      loadTrack,
-      replaceMain,
-      getState: () => state,
+      loadTrack,              // Añadir pista al estado (y refrescar)
+      replaceMain,            // Reemplazar la pista “actual” (render+play)
+      getState: () => state,  // Lectura del estado para lógica externa (semillas, etc.)
       selectForConcat: onSelectForConcat,
       clearConcatSelection: onClearConcatSelection,
       concatLastTwo,
       concatAB
     };
+}
 
-  }
-
+  /* Añade una pista nueva al estado (tracks) y refresca la pista/visual/audio.
+     - ns: NoteSequence a añadir
+     - { name, program, isDrum }: metadatos opcionales de la pista
+  */
   function loadTrack(ns, { name = 'Track', program = 0, isDrum = false } = {}) {
     state.tracks.push({ ns: ensureNsMeta(ns), name, program, isDrum, isActive: true });
     onTrackUpdate();
@@ -258,7 +272,18 @@ export const App = (() => {
   }
 
 
+  /*
+  Recorta un fragmento de la melodía actual entre dos tiempos (startSec y endSec).
+  Permite escuchar solo ese fragmento ("audition") o guardar el recorte como una nueva pista.
+  */
+
   function onApplyTrim({ startSec, endSec, audition = false, restore = false }) {
+    /*
+      - startSec: Segundo inicial del recorte.
+      - endSec: Segundo final del recorte.
+      - audition: Si es true, solo reproduce el recorte, no lo guarda.
+      - restore: Si es true, restaura la melodía original.
+    */
     if (restore) {
       if (state.original) replaceMain(state.original);
       return;
@@ -270,6 +295,7 @@ export const App = (() => {
       const auditionPlayer = new LoopingPlayer({});
       auditionPlayer.start(trimmedNs, { qpm: state.qpm });
     } else {
+      // Guardar el recorte como nueva pista
       state.current = trimmedNs;
       viz.render(trimmedNs);
       player.start(trimmedNs, { qpm: state.qpm });
@@ -280,6 +306,10 @@ export const App = (() => {
     }
   }
 
+    /* 
+    Concatena varias pistas musicales, una detrás de otra (no en paralelo, sino en secuencia temporal).
+    Puede hacerlo con dos pistas seleccionadas (A y B) o con todas las pistas activas.
+    */
   function onConcatenateTracks() {
     // Usa A+B si están seleccionadas; si no, concatena todas las activas
     const { a, b } = state.concatSelection || {};
@@ -302,6 +332,11 @@ export const App = (() => {
       alert('No se pudo concatenar: ' + (err?.message || String(err)));
     }
   }
+
+  /*
+    Permite seleccionar dos pistas (A y B) para realizar acciones que requieren dos pistas, como concatenar o unir en paralelo.
+    Gestiona la lógica de selección y, si corresponde, ejecuta la acción de unión automática.
+  */
 
   function onSelectForConcat(index) {
     // Selecciona primero A, luego B. Si A y B ocupados, reinicia con A=index

@@ -1,4 +1,10 @@
-import { makeArpeggio, makeScale } from '../../lib/models/baseline.js';
+/*
+Recuerda: 
+  - SPQ = steps por negra; QPM = negras por minuto.
+  - 1 step (seg) = 60 / (QPM × SPQ).
+*/
+
+import { makeArpeggio, makeScale, makeMajorScale } from '../../lib/models/baseline.js';
 // 1. Importamos las clases de los modelos de IA y las URLs de los checkpoints
 import { MusicRnnService } from '../../lib/models/musicrnn.js';
 import { MusicVaeService } from '../../lib/models/musicvae.js';
@@ -18,23 +24,31 @@ window.addEventListener('DOMContentLoaded', () => {
   // --- Botones de Melodías Simples (Baseline) ---
   const btnScale = document.createElement('button');
   const btnArpeggio = document.createElement('button');
+  const btnMajor = document.createElement('button');
 
   // TODO: añadir botón de crear melodías a partir de notas aqui.
 
   btnScale.textContent = 'Crear Escala';
   btnArpeggio.textContent = 'Crear Arpegio';
+  btnMajor.textContent = 'Crear Escala Mayor (real)';
   modelsPanel.appendChild(btnScale);
   modelsPanel.appendChild(btnArpeggio);
+  modelsPanel.appendChild(btnMajor);
 
   btnScale.onclick = () => {
-    const miEscala = makeScale({ tonic: 50, length: 16, dur: 0.25 });
+    const miEscala = makeScale({ tonic: 50, length: 16, durBeats: 0.25, qpm: QPM });
     App.loadTrack(miEscala, { name: 'Mi Escala' });
   };
 
   btnArpeggio.onclick = () => {
     // Corregido: makeArpeggio usa 'chord' en lugar de 'tonic'
-    const miArpegio = makeArpeggio({ chord: [50, 54, 57, 62], cycles: 4, dur: 0.25 });
+    const miArpegio = makeArpeggio({ chord: [50, 54, 57, 62], cycles: 4, durBeats: 0.25, qpm: QPM });
     App.loadTrack(miArpegio, { name: 'Mi Arpegio' });
+  };
+
+  btnMajor.onclick = () => {
+    const ns = makeMajorScale({ tonic: 60, octaves: 1, durBeats: 0.25 }); // Do mayor, 1 octava
+    App.loadTrack(ns, { name: 'Escala Mayor' });
   };
 
   // Separador visual para los modelos de IA
@@ -67,21 +81,16 @@ window.addEventListener('DOMContentLoaded', () => {
     btnRnn.textContent = 'Generando... 🧠';
     btnRnn.disabled = true;
 
-    // MusicRNN necesita una "semilla" para empezar. Usemos la última pista activa.
-    const state = App.getState();
-    const lastTrack = state.tracks.length > 0 ? state.tracks[state.tracks.length - 1].ns : null;
-
-    if (!lastTrack) {
-        alert("Añade primero una pista (escala o arpegio) para que la IA la pueda continuar.");
-        btnRnn.textContent = 'IA: Continuar Melodía (RNN)';
-        btnRnn.disabled = false;
-        return;
-    }
-
     try {
     await rnn.initialize(); // Asegura que el modelo esté cargado
-    const continuacion = await rnn.continue(lastTrack, { steps: 64, temperature: 1.1 });
-    App.loadTrack(continuacion, { name: 'Continuación RNN' });
+    const { current } = App.getState();   // ← mezcla activa ya unificada por generic.js
+    if (!current || !current.notes?.length) {
+      alert('No hay mezcla activa. Activa pistas o crea una escala/arpegio primero.');
+      return;
+    }
+
+    const cont = await rnn.continue(current, { steps: 64, temperature: 1.0 });
+    App.loadTrack(cont, { name: 'Continuación RNN (mezcla activa)' });
 
     } catch (error) {
         console.error('Error RNN:', error);
