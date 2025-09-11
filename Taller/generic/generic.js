@@ -2,8 +2,8 @@
 
 import { LoopingPlayer } from '../lib/core/player.js';
 import { Roll } from '../lib/core/visualize.js';
-import { buildTransport, buildTrim, buildSaveLoad, buildTracks, bindTitleInput } from '../lib/ui/components.js';
-import { mergeFromState, concatenate, merge, setInstrument } from '../lib/core/sequences.js';
+import { buildTransport, buildSaveLoad, buildTracks, bindTitleInput } from '../lib/ui/components.js';
+import { merge, setInstrument } from '../lib/core/sequences.js';
 import { concatOnGrid } from '../lib/core/concat.js';
 
 // SPQ (Steps Per Quarter) = subdivisiones por negra.
@@ -14,7 +14,6 @@ export const App = (() => {
   const state = {
     title: '',
     current: null,     // mezcla de pistas activas visualizada/reproducida
-    original: null,    // copia base para restaurar tras trim
     tracks: [],        // [{ ns, name, program, isDrum, isActive }]
     qpm: 120,
     concatSelection: { a: null, b: null }, // selección A/B
@@ -23,8 +22,6 @@ export const App = (() => {
 
   // Instancias únicas
   let player, viz;
-  // Reproductor de pre-escucha (trim audition)
-  let auditionPlayer = null;
 
   // -------------------------------
   // Normalización de cuadrícula
@@ -203,11 +200,11 @@ export const App = (() => {
 
     bindTitleInput('#songTitle', state);
     buildTransport('#transport', player, state);
-    buildTrim('#trimPanel', state, onApplyTrim);
 
-    // evitamos duplicación: usamos los handlers declarados arriba
+    // Cargar/descargar MIDI
     buildSaveLoad('#saveLoadPanel', state, onLoadSequence, onDownload);
 
+    // Pistas
     buildTracks('#tracksPanel', state, {
       onMergeTracks,
       onTrackUpdate,
@@ -240,44 +237,9 @@ export const App = (() => {
 
   function replaceMain(ns) {
     const safe = ensureNsMeta(ns);
-    // si había una pre-escucha de trim sonando, deténla
-    try { auditionPlayer?.stop?.(); } catch {}
-    auditionPlayer = null;
-
-    state.current  = safe;
-    state.original = safe;
+    state.current = safe;
     viz.render(safe);
     player.start(safe, { qpm: state.qpm });
-  }
-
-  function onApplyTrim({ startSec, endSec, audition = false, restore = false }) {
-    if (restore) {
-      if (state.original) replaceMain(state.original);
-      return;
-    }
-    const source = state.current || state.original;
-    if (!source) return;
-
-    const trimmedNs = window.__lib.trim(source, startSec, endSec);
-    if (audition) {
-      // gestiona una sola instancia global de audition
-      try { auditionPlayer?.stop?.(); } catch {}
-      auditionPlayer = new LoopingPlayer({});
-      auditionPlayer.start(ensureNsMeta(trimmedNs), { qpm: state.qpm });
-    } else {
-      state.current = ensureNsMeta(trimmedNs);
-      viz.render(state.current);
-      player.start(state.current, { qpm: state.qpm });
-      // además, añade el recorte como pista nueva
-      state.tracks.push({
-        ns: state.current,
-        name: `Recorte ${startSec}s-${endSec}s`,
-        program: 0,
-        isDrum: false,
-        isActive: true
-      });
-      onTrackUpdate();
-    }
   }
 
   function onConcatenateTracks() {
