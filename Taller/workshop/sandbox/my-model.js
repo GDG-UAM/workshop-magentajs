@@ -7,7 +7,9 @@ Recuerda:
 import { makeArpeggio, makeScale, makeMajorScale } from '../../lib/models/baseline.js';
 // 1. Importamos las clases de los modelos de IA y las URLs de los checkpoints
 import { MusicRnnService } from '../../lib/models/musicrnn.js';
-import { MusicVaeService } from '../../lib/models/musicvae.js';
+import { MelodyVaeService, TrioVaeService } from '../../lib/models/musicvae.js';
+
+
 import { CHECKPOINTS, WORKSHOP } from '../../lib/config/constants.js';
 
 window.addEventListener('DOMContentLoaded', () => {
@@ -66,8 +68,14 @@ window.addEventListener('DOMContentLoaded', () => {
     qpm: QPM,
     stepsPerQuarter: SPQ,
   });
-  const vae = new MusicVaeService({
-    checkpointURL: CHECKPOINTS.musicvae.melody,
+  const vaeMelody = new MelodyVaeService({
+  checkpointURL: CHECKPOINTS.musicvae.melody,
+  qpm: QPM,
+  stepsPerQuarter: SPQ
+  });
+
+  const vaeTrio = new TrioVaeService({
+    checkpointURL: CHECKPOINTS.musicvae.trio,
     qpm: QPM,
     stepsPerQuarter: SPQ
   });
@@ -101,29 +109,47 @@ window.addEventListener('DOMContentLoaded', () => {
     }
   };
 
-  // --- Botón para MusicVAE (Crear una melodía desde cero) ---
-  const btnVae = document.createElement('button');
-  btnVae.textContent = 'IA: Crear Melodía (VAE)';
-  modelsPanel.appendChild(btnVae);
+  // --- Melody VAE ---
+  const btnVaeMelody = document.createElement('button');
+  btnVaeMelody.textContent = 'VAE: Melody (4bar)';
+  modelsPanel.appendChild(btnVaeMelody);
 
-  btnVae.onclick = async () => {
-    btnVae.textContent = 'Generando... 🧠';
-    btnVae.disabled = true;
-
-
+  btnVaeMelody.onclick = async () => {
+    const prev = btnVaeMelody.textContent; btnVaeMelody.disabled = true;
+    btnVaeMelody.textContent = 'Generando... 🧠';
     try {
-      await vae.initialize(); // Asegura que el modelo esté cargado
-      // .sample(1) crea 1 melodía nueva y aleatoria
-      const [melodiaNueva] = await vae.sample(1, 0.9);
-      App.loadTrack(melodiaNueva, { name: 'Melodía VAE' });
+      await vaeMelody.initialize();
+      const [out] = await vaeMelody.sample(1, 0.9);
+      App.loadTrack(out, { name: 'Melodía VAE' });
+    } catch (e) {
+      console.error('Error VAE (melody):', e);
+      alert('Error (Melody VAE): ' + (e?.message || String(e)));
+    } finally { btnVaeMelody.textContent = prev; btnVaeMelody.disabled = false; }
+  };
 
-    } catch(error){
-      console.error('Error VAE:', error);
-      alert('Error al generar con MusicVAE: ' + (error?.message || String(error)));
-    } finally {
-      btnVae.textContent = 'IA: Crear Melodía (VAE)';
-      btnVae.disabled = false;
-    }
+  // --- Trio VAE ---
+  const btnVaeTrio = document.createElement('button');
+  btnVaeTrio.textContent = 'VAE: Trio (4bar)';
+  modelsPanel.appendChild(btnVaeTrio);
+
+  btnVaeTrio.onclick = async () => {
+    const prev = btnVaeTrio.textContent; btnVaeTrio.disabled = true;
+    btnVaeTrio.textContent = 'Generando... 🧠';
+    try {
+      await vaeTrio.initialize();
+      const [out] = await vaeTrio.sample(1, 0.9);
+      const parts = vaeTrio.splitIntoTracks(out);
+      if (parts.length === 0) {
+        App.loadTrack(out, { name: 'Trio (única pista)' });
+      } else {
+        parts.forEach(p => App.loadTrack(p.ns, {
+          name: `Trio: ${p.name}`, program: p.program, isDrum: p.isDrum
+        }));
+      }
+    } catch (e) {
+      console.error('Error VAE (trio):', e);
+      alert('Error (Trio VAE): ' + (e?.message || String(e)));
+    } finally { btnVaeTrio.textContent = prev; btnVaeTrio.disabled = false; }
   };
 
   // Botón de concatenar eliminado: la concatenación ahora se realiza desde el panel de Pistas.
