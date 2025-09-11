@@ -2,13 +2,16 @@
 
 import { downloadMidi, fileToSequence } from '../core/midi.js';
 import { mergeFromState, setInstrument, quantize } from '../core/sequences.js';
+import { downloadTrack, fileToTrack } from '../core/trackio.js';
 
 // Exponemos solo lo que sigue usándose en el resto de la app
 window.__lib = {
-  download: downloadMidi,
+  downloadMidi, // lo dejamos expuesto por compatibilidad
+  downloadTrack,
+  fileToTrack,
   mergeFromState,
   setInstrument,
-  quantize,
+  quantize
 };
 
 export function bindTitleInput(selector, state) {
@@ -57,18 +60,45 @@ export function buildTransport(selector, player, state) {
   };
 }
 
-export function buildSaveLoad(selector, state, onLoadSequence, onDownload) {
+export function buildSaveLoad(selector, state, onLoadTrack, onDownloadTrack) {
   const root = document.querySelector(selector);
   root.innerHTML = `
-    <button id="btnDownload">💾 Descargar .mid</button>
-    <input id="fileIn" type="file" accept=".mid,.midi" />
+    <button id="btnDownload">💾 Descargar Track (.magtrack)</button>
+    <input id="fileIn" type="file" accept=".magtrack,.json,.mid,.midi" />
   `;
-  root.querySelector('#btnDownload').onclick = () => onDownload();
+  root.querySelector('#btnDownload').onclick = () => onDownloadTrack();
   root.querySelector('#fileIn').onchange = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const ns = await fileToSequence(file);
-    onLoadSequence(ns);
+     // Sniff rápido por extensión y cabecera del archivo:
+    const name = (file.name || '').toLowerCase();
+    const header = (await file.slice(0, 16).text()).trim();
+    const looksLikeMagtrack =
+      name.endsWith('.magtrack') ||
+      header.startsWith('{"type"') || header.startsWith('{');
+    const looksLikeMidi =
+      name.endsWith('.mid') || name.endsWith('.midi') ||
+      header.startsWith('MThd'); // cabecera MIDI estándar
+
+    if (looksLikeMagtrack && !looksLikeMidi) {
+      try {
+        const { ns, meta } = await fileToTrack(file);
+        return onLoadTrack(ns, meta);
+      } catch (err) {
+        console.error('[open] Error abriendo .magtrack:', err);
+        alert('El archivo .magtrack no es válido: ' + (err?.message || String(err)));
+        return;
+      }
+    }
+    try {
+      const ns = await fileToSequence(file);
+      onLoadSequence(ns);
+      onLoadTrack(ns, {});
+    } catch (err) {
+      alert('No se pudo abrir el archivo: ' + (err?.message || String(err)));
+      console.error('[open] Error abriendo MIDI:', err);
+      alert('No se pudo abrir el MIDI: ' + (err?.message || String(err)));
+    }
   };
 }
 

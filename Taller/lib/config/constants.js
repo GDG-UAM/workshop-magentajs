@@ -1,8 +1,8 @@
 
 // Parámetros recomendados del taller (usar en sandbox y UI genérica)
 export const WORKSHOP = {
-  QPM: 90,
-  SPQ: 6,
+  QPM: 60,
+  SPQ: 4,
 };
 
 // Checkpoints oficiales (TF.js) alojados por Magenta

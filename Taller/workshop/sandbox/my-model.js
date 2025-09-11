@@ -246,6 +246,129 @@ window.addEventListener('DOMContentLoaded', () => {
     }
   };
 
+  // ─────────────────────────── Rock Drums (Verse/Chorus) ───────────────────────────
+  (() => {
+    // Mapa GM para batería
+    const DRUMS = {
+      KICK: 36,
+      SNARE: 38,
+      HAT_C: 42,
+      HAT_O: 46,
+      CRASH: 49,
+      RIDE: 51,
+      TOM_HI: 50,
+      TOM_MID: 47,
+      TOM_LO: 45,
+    };
+
+    // Duraciones en beats ajustadas a tu rejilla (1 step = 1/SPQ beats)
+    const STEP = 1 / SPQ;          // 1 semicorchea si SPQ=4
+    const SHORT = STEP;            // duración mínima segura para evitar 0 steps
+    const CYMB = STEP * 2;         // algo más largo para platos
+
+    const BAR_LEN = 4;             // 4/4 → 4 beats por compás
+
+    // Empuja un patrón (array de offsets en beats) repetido en un compás base
+    function pushPattern(ev, pitch, barStart, offsets, durBeats, velocity = 100) {
+      for (const off of offsets) {
+        ev.push({ pitch, startBeats: barStart + off, durBeats, velocity });
+      }
+    }
+
+    // Rellena eventos de una sección ("verse" | "chorus") a partir de un compás de inicio
+    function addSectionEvents(ev, { section = 'verse', bars = 8, startBar = 0 }) {
+      for (let b = 0; b < bars; b++) {
+        const barStart = (startBar + b) * BAR_LEN;
+
+        // Chapa principal: verso = hat cerrado a corcheas; estribillo = ride a corcheas
+        const pulseOffsets = [0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5];
+        const pulsePitch = section === 'verse' ? DRUMS.HAT_C : DRUMS.RIDE;
+        pushPattern(ev, pulsePitch, barStart, pulseOffsets, SHORT, section === 'verse' ? 85 : 100);
+
+        // Caja en 2 y 4 (beats 1 y 3 en base 0)
+        pushPattern(ev, DRUMS.SNARE, barStart, [1, 3], SHORT, 115);
+
+        // Bombo
+        if (section === 'verse') {
+          // Típico rock: 1 y 3 + pequeñas variaciones alternas
+          const kick = [0, 2].concat((b % 2 === 1) ? [2.5] : [1.5]);
+          pushPattern(ev, DRUMS.KICK, barStart, kick, SHORT, 120);
+          // Apertura de charles al final del compás
+          ev.push({ pitch: DRUMS.HAT_O, startBeats: barStart + 3.5, durBeats: CYMB, velocity: 105 });
+        } else {
+          // Estribillo: más empuje
+          const kick = [0, 1.5, 2, 3.5];
+          pushPattern(ev, DRUMS.KICK, barStart, kick, SHORT, 122);
+        }
+
+        // Crash al inicio de la sección
+        if (b === 0) {
+          ev.push({ pitch: DRUMS.CRASH, startBeats: barStart, durBeats: CYMB, velocity: 127 });
+        }
+      }
+
+      // Fill sencillo de toms al final de la sección
+      const lastBarStart = (startBar + bars - 1) * BAR_LEN;
+      const fill = [
+        { pitch: DRUMS.TOM_HI, startBeats: lastBarStart + 3.00, durBeats: SHORT, velocity: 116 },
+        { pitch: DRUMS.TOM_MID, startBeats: lastBarStart + 3.25, durBeats: SHORT, velocity: 116 },
+        { pitch: DRUMS.TOM_LO, startBeats: lastBarStart + 3.50, durBeats: SHORT, velocity: 116 },
+      ];
+      ev.push(...fill);
+    }
+
+    // Construye una NS de batería para una sección
+    function makeRockDrumsSection(section = 'verse', bars = 8) {
+      const events = [];
+      addSectionEvents(events, { section, bars, startBar: 0 });
+      const ns = makeAbsoluteSequence({ events, qpm: QPM });
+      // Importante: marcar cada nota como batería
+      ns.notes.forEach(n => n.isDrum = true);
+      return ns;
+    }
+
+    // Construye una NS con estructura completa (por defecto: verso x8 + estribillo x8)
+    function makeRockDrumsSong(structure = [['verse', 8], ['chorus', 8]]) {
+      const events = [];
+      let cursorBar = 0;
+      for (const [section, bars] of structure) {
+        addSectionEvents(events, { section, bars, startBar: cursorBar });
+        cursorBar += bars;
+      }
+      const ns = makeAbsoluteSequence({ events, qpm: QPM });
+      ns.notes.forEach(n => n.isDrum = true);
+      return ns;
+    }
+
+    // ── Botones UI ──
+    const btnDrumsVerse = document.createElement('button');
+    btnDrumsVerse.textContent = 'Batería Rock – Verso';
+    btnDrumsVerse.onclick = () => {
+      const ns = makeRockDrumsSection('verse', 8);
+      App.loadTrack(ns, { name: 'Batería: Verso (8 compases)', isDrum: true });
+    };
+    modelsPanel.appendChild(btnDrumsVerse);
+
+    const btnDrumsChorus = document.createElement('button');
+    btnDrumsChorus.textContent = 'Batería Rock – Estribillo';
+    btnDrumsChorus.onclick = () => {
+      const ns = makeRockDrumsSection('chorus', 8);
+      App.loadTrack(ns, { name: 'Batería: Estribillo (8 compases)', isDrum: true });
+    };
+    modelsPanel.appendChild(btnDrumsChorus);
+
+    const btnDrumsSong = document.createElement('button');
+    btnDrumsSong.textContent = 'Batería Rock – Canción (Verse→Chorus)';
+    btnDrumsSong.onclick = () => {
+      // Cambia la estructura si quieres (p.ej. [['verse',8], ['chorus',8], ['verse',8], ['chorus',8]])
+      const ns = makeRockDrumsSong([['verse', 8], ['chorus', 8]]);
+      App.loadTrack(ns, { name: 'Batería: Verse→Chorus', isDrum: true });
+    };
+    modelsPanel.appendChild(btnDrumsSong);
+  })();
+
+
+
 
   // Botón de concatenar eliminado: la concatenación ahora se realiza desde el panel de Pistas.
 });

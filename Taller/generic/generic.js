@@ -130,6 +130,15 @@ export const App = (() => {
     loadTrack(ns, { name, program, isDrum });
   }
 
+
+  function onLoadTrackFile(ns, meta = {}) {
+    const name = meta.name || 'Importado';
+    const program = meta.program ?? 0;
+    const isDrum = !!meta.isDrum;
+    const preserveInstruments = !!meta.preserveInstruments;
+    loadTrack(ns, { name, program, isDrum, preserveInstruments });
+  }
+
   function onDownload() {
     const active = state.tracks
       .filter(t => t.isActive)
@@ -146,6 +155,26 @@ export const App = (() => {
     const filename = (state.title?.trim() || 'magenta_sandbox') + '.mid';
     window.__lib.download(ns, filename);
   }
+
+
+  // Descarga "lo que oyes" como Track portable (.magtrack)
+  function onDownloadTrack() {
+    if (!state.current) {
+      alert('No hay nada para exportar.');
+      return;
+    }
+    const name = (state.title?.trim() || 'export_mix');
+    const trackLike = {
+      ns: ensureNsMeta(state.current),
+      name,
+      program: 0,
+      isDrum: false,
+      preserveInstruments: true // importante: lo que oyes por-nota
+    };
+    const filename = `${name.replace(/[\/\\?%*:|"<>]/g,'-')}.magtrack`;
+    window.__lib.downloadTrack(trackLike, filename);
+  }
+
 
   function onToggleTrack(index) {
     const t = state.tracks[index];
@@ -213,7 +242,7 @@ export const App = (() => {
     buildTransport('#transport', player, state);
 
     // Cargar/descargar MIDI
-    buildSaveLoad('#saveLoadPanel', state, onLoadSequence, onDownload);
+    buildSaveLoad('#saveLoadPanel', state, onLoadTrackFile, onDownloadTrack);
 
     // Pistas
     buildTracks('#tracksPanel', state, {
