@@ -1,5 +1,5 @@
 /*
-Recuerda: 
+Recuerda:
   - SPQ = steps por negra; QPM = negras por minuto.
   - 1 step (seg) = 60 / (QPM × SPQ).
 */
@@ -94,7 +94,7 @@ window.addEventListener('DOMContentLoaded', () => {
   Tempo único del taller: QPM
   Resolución única del taller: SPQ
   */
-  
+
   // 1) Instancias
   const rnnBasic = new MusicRnnService({
     checkpointURL: CHECKPOINTS.musicrnn.basic,
@@ -129,7 +129,7 @@ window.addEventListener('DOMContentLoaded', () => {
     temperature: 0.99
   });
 
-  
+
   // --- Botones para MusicRNN (Continuar una melodía) ---
   async function runRnn(model, button, label, { steps = 64, temperature = 1.0 } = {}) {
     button.disabled = true;
@@ -152,6 +152,19 @@ window.addEventListener('DOMContentLoaded', () => {
       button.disabled = false;
     }
   };
+
+  // --- Basic RNN ---
+
+  // Botones para los dos RNNs
+  const btnRnnBasic = document.createElement('button');
+  btnRnnBasic.textContent = 'IA: Continuar (Basic RNN)';
+  modelsPanel.appendChild(btnRnnBasic);
+  btnRnnBasic.onclick = () => runRnn(rnnBasic, btnRnnBasic, 'Basic RNN', { steps: 64, temperature: 1.0 });
+
+  const btnRnnMelody = document.createElement('button');
+  btnRnnMelody.textContent = 'IA: Continuar (Melody RNN)';
+  modelsPanel.appendChild(btnRnnMelody);
+  btnRnnMelody.onclick = () => runRnn(rnnMelody, btnRnnMelody, 'Melody RNN', { steps: 64, temperature: 1.0 });
 
   // --- Melody VAE ---
   const btnVaeMelody = document.createElement('button');
