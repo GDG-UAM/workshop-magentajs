@@ -123,6 +123,10 @@ export function quantize(ns, stepsPerQuarter = 4) {
 */
 export function mergeFromState(state) {
   const activeTracks = state.tracks.filter(t => t.isActive);
-  const arranged = activeTracks.map(t => setInstrument(t.ns, t.program ?? 0, t.isDrum ?? false));
+  const arranged = activeTracks.map(t =>
+    t.preserveInstruments
+      ? ensureMeta(t.ns)
+      : setInstrument(t.ns, t.program ?? 0, t.isDrum ?? false)
+  );
   return ensureMeta(merge(arranged));
 }

@@ -194,7 +194,10 @@ export const App = (() => {
     });
 
     const combined = merge(arranged);
-    loadTrack(combined, { name: 'Unión (paralelo)' });
+    loadTrack(ensureNsMeta(combined), {
+      name: 'Unión (paralelo)',
+      preserveInstruments: true
+    });
     state.concatSelection = { a: null, b: null };
     onTrackUpdate();
   }
@@ -301,11 +304,19 @@ export const App = (() => {
       const tA = state.tracks[sel.a];
       const tB = state.tracks[sel.b];
       if (tA?.ns && tB?.ns) {
-        const arranged = [tA, tB].map(t => setInstrument(t.ns, t.program ?? 0, t.isDrum ?? false));
-        const combined = merge(arranged);
+       const arranged = [tA, tB].map(t =>
+         t.preserveInstruments
+           ? ensureNsMeta(t.ns)
+           : setInstrument(t.ns, t.program ?? 0, t.isDrum ?? false)
+       );
+       const combined = merge(arranged);
+       ;
         const nameA = tA.name || `Track ${sel.a + 1}`;
         const nameB = tB.name || `Track ${sel.b + 1}`;
-        loadTrack(combined, { name: `Unión ${nameA} + ${nameB}` });
+        loadTrack(ensureNsMeta(combined), {
+         name: `Unión ${nameA} + ${nameB}`,
+         preserveInstruments: true
+       })
       }
       state.mergeAwaiting = false;
       state.concatSelection = { a: null, b: null };
@@ -338,7 +349,6 @@ export const App = (() => {
     const spq = first?.quantizationInfo?.stepsPerQuarter ?? 4;
 
     const ns = concatOnGrid(seqs, { qpm, spq, mm: window.mm });
-    loadTrack(ensureNsMeta(ns), { name: label || 'Concatenación' });
     // MUY IMPORTANTE: preservar instrumentos por nota en la pista resultante
     loadTrack(ensureNsMeta(ns), {
       name: label || 'Concatenación',
