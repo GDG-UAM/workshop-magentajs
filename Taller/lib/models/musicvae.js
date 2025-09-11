@@ -1,274 +1,395 @@
-// File: Taller/lib/models/musicvae.js
 // ----------------------------------------------------------------------------
 // MusicVAE wrapper para Magenta.js orientado a taller/competición.
 // - Carga perezosa del modelo (initialize())
-// - Métodos de alto nivel: sample(), interpolate(), encode(), decode(), similar()
-// - Cuida la cuantización (stepsPerQuarter) y tempo (qpm)
+// - API de alto nivel: sample(), interpolate(), encode(), decode(), similar()
+// - Normaliza siempre salida (tempo/SPQ y totalTime/totalQuantizedSteps)
 // - Soporta tanto "mm" global (CDN) como import dinámico ESM
+// - splitIntoTracks(ns): separa por partes (útil para Trio/GrooVAE)
+// - Tres variantes listas: MelodyVaeService, TrioVaeService, GrooveVaeService
 //
-// Uso mínimo (en una demo o ejercicio):
-//   import { MusicVaeService } from '../lib/models/musicvae.js';
-//
-//   const vae = new MusicVaeService({
-//     checkpointURL: 'URL_DEL_CHECKPOINT_MELODY', // p.ej. melody_2bar o trio_16bar
-//     stepsPerQuarter: 4,
-//     qpm: 120
-//   });
-//   await vae.initialize();
-//   const [ns] = await vae.sample(1, 0.8);
-//   App.loadTrack(ns, { name: 'VAE sample', program: 0 });
-//
+// Buenas prácticas incluidas:
+//   * Nunca devolvemos secuencias sin totalTime o totalQuantizedSteps (>0).
+//   * Respetamos el SPQ propio del modelo cuando aplica (Trio/Groove).
+//   * No mutamos NoteSequences de entrada: clonamos/sanitizamos.
 // ----------------------------------------------------------------------------
 
-/**
- * Intenta obtener el namespace de Magenta.js:
- * - Si usamos CDN: window.mm existe.
- * - Si usamos bundler/ESM: intentamos import('@magenta/music').
- */
+/** Obtiene el namespace de Magenta.js robustamente (CDN ó ESM). */
 async function getMagenta() {
   if (typeof window !== 'undefined' && window.mm) return window.mm;
-
-  // Entorno ESM/bundler. Si falla, explicamos cómo solucionarlo.
   try {
-    // Nota: este import requiere que @magenta/music esté en node_modules.
     const mod = await import('@magenta/music');
     return mod;
   } catch (err) {
-    const msg = [
-      '[MusicVaeService] No encuentro @magenta/music.',
-      'Soluciones posibles:',
-      '  (A) Añade en el HTML: <script src="https://unpkg.com/@magenta/music@1.23.1"></script>',
-      '  (B) Instala y usa ESM:  npm i @magenta/music  y bundler (Vite/Webpack).',
-    ].join('\n');
-    console.error(msg);
+    console.error(
+      '[MusicVaeService] No encuentro @magenta/music.\n' +
+      '  (A) CDN: <script src="https://unpkg.com/@magenta/music@1.23.1"></script>\n' +
+      '  (B) npm i @magenta/music  + bundler (Vite/Webpack)'
+    );
     throw err;
   }
 }
 
-/**
- * Opciones de inicialización del servicio.
- * @typedef {Object} MusicVaeOptions
- * @property {string} checkpointURL   URL/carpeta del checkpoint de MusicVAE.
- * @property {number} [stepsPerQuarter=4]  Resolución de cuadrícula (SPQ).
- * @property {number} [qpm=120]            Tempo en negras por minuto (QPM/BPM).
- * @property {Object} [controlArgs]        Args opcionales para modelos condicionados (acordes, etc.).
- */
+/** Heurística: hay modelos que fijan su propio SPQ (p.ej. trio_*, groovae_). */
+function urlHasOwnSpq(url = '') {
+  return /\/(trio_|groovae_)/i.test(String(url));
+}
 
 /**
- * Servicio de alto nivel para trabajar con MusicVAE en el taller.
- * Encapsula el ciclo de vida del modelo y ofrece helpers amigables.
+ * @typedef {Object} MusicVaeOptions
+ * @property {string}  checkpointURL            URL/carpeta del checkpoint de MusicVAE.
+ * @property {number}  [stepsPerQuarter=4]      SPQ (resolución de cuadrícula).
+ * @property {number}  [qpm=120]                Tempo QPM/BPM.
+ * @property {Object}  [controlArgs]            Args para modelos condicionados (acordes, etc).
+ * @property {boolean} [preferModelSpq]         Fuerza a usar SPQ del modelo si lo declara.
  */
+
+/** Servicio base para trabajar con MusicVAE. */
 export class MusicVaeService {
-  /**
-   * @param {MusicVaeOptions} opts
-   */
   constructor({
     checkpointURL,
     stepsPerQuarter = 4,
     qpm = 120,
     controlArgs = undefined,
+    preferModelSpq = undefined, // por defecto: deducido por URL
   } = {}) {
-    if (!checkpointURL) {
-      throw new Error('[MusicVaeService] Falta "checkpointURL".');
-    }
-    this._checkpointURL = checkpointURL;
-    this._spq = stepsPerQuarter;
-    this._qpm = qpm;
-    this._controlArgs = controlArgs;
+    if (!checkpointURL) throw new Error('[MusicVaeService] Falta "checkpointURL".');
 
-    this._mm = null;        // namespace de Magenta
-    this._model = null;     // instancia de mm.MusicVAE
-    this._init = null;      // promesa de initialize()
+    // Config
+    this._checkpointURL  = checkpointURL;
+    this._spq            = stepsPerQuarter;
+    this._qpm            = qpm;
+    this._controlArgs    = controlArgs;
+
+    // Estado interno
+    this._mm             = null;     // namespace Magenta
+    this._model          = null;     // instancia mm.MusicVAE
+    this._init           = null;     // promesa initialize()
+    this._modelSpq       = null;     // SPQ declarado por el modelo (si lo hay)
+    this._spqFromModel   = (preferModelSpq != null)
+      ? !!preferModelSpq
+      : urlHasOwnSpq(checkpointURL); // heurística si no se fuerza
+
+    // Flags semánticos útiles (nombres de ayuda, no estrictamente necesarios)
+    this._isTrio         = /trio_/i.test(checkpointURL);
+    this._isGroove       = /groovae_/i.test(checkpointURL);
   }
 
   // -------------------------------
   // Ciclo de vida
   // -------------------------------
 
-  /**
-   * Carga el namespace de Magenta y el checkpoint del modelo.
-   * Idempotente: puedes llamarlo varias veces sin coste extra.
-   */
+  /** Carga Magenta y el checkpoint. Idempotente. */
   async initialize() {
     if (this._init) return this._init;
-
     this._init = (async () => {
       this._mm = await getMagenta();
       this._model = new this._mm.MusicVAE(this._checkpointURL);
       await this._model.initialize();
-    })();
 
+      // Intentar descubrir SPQ del modelo
+      const dcArgs = this._model?.dataConverter?.args || {};
+      if (Number.isInteger(dcArgs.stepsPerQuarter)) {
+        this._modelSpq = dcArgs.stepsPerQuarter;
+        // Si el modelo declara SPQ, por defecto lo respetamos para evitar conflictos.
+        if (this._spqFromModel === false) {
+          // respetar preferencia manual
+        } else {
+          this._spqFromModel = true;
+        }
+      }
+    })();
     return this._init;
   }
 
-  /**
-   * Libera tensores y memoria del modelo (útil si el taller re-carga muchos modelos).
-   */
+  /** Libera memoria. */
   dispose() {
-    if (this._model && typeof this._model.dispose === 'function') {
-      this._model.dispose();
-    }
+    if (this._model?.dispose) this._model.dispose();
     this._model = null;
     this._mm = null;
     this._init = null;
+  }
+
+  /** Cambia de checkpoint (requerirá nuevo initialize()). */
+  setCheckpointURL(url) {
+    if (!url || typeof url !== 'string') {
+      throw new Error('[MusicVaeService] setCheckpointURL: url inválida');
+    }
+    this.dispose();
+    this._checkpointURL = url;
+    this._spqFromModel  = urlHasOwnSpq(url);
+    this._modelSpq      = null;
+    this._isTrio        = /trio_/i.test(url);
+    this._isGroove      = /groovae_/i.test(url);
   }
 
   // -------------------------------
   // Helpers internos
   // -------------------------------
 
-  /**
-   * Asegura que una NoteSequence esté cuantizada a "stepsPerQuarter" (SPQ) uniforme.
-   * - Muchos flujos de VAE esperan cuantización coherente.
-   * - Si ya está cuantizada, devuelve una copia coherente; si no, cuantiza.
-   * @param {Object} ns  INoteSequence
-   * @returns {Object}   NoteSequence cuantizada
-   */
+  /** Cuantiza a SPQ objetivo (modelo o taller). No muta la entrada. */
   _quantize(ns) {
-    const mm = this._mm;
-    // Si ya está cuantizada, podríamos aceptar tal cual, pero
-    // en taller preferimos homogeneizar a this._spq:
     try {
-      return mm.sequences.quantizeNoteSequence(ns, this._spq);
-    } catch (e) {
-      // Errores típicos: múltiples tempos o compases; para taller, simplificamos.
-      console.warn('[MusicVaeService] No he podido cuantizar con SPQ=', this._spq, e);
-      // Devolvemos el original para no bloquear el ejercicio.
+      const mm  = this._mm;
+      const spq = (this._spqFromModel && this._modelSpq) ? this._modelSpq : this._spq;
+      if (!spq) return ns;
+      // ya cuantizada al mismo SPQ → tal cual
+      const cur = ns?.quantizationInfo?.stepsPerQuarter;
+      if (cur === spq) return ns;
+      // des-cuantizar si trae otra cuadrícula
+      if (cur && cur !== spq) {
+        const qpm = ns?.tempos?.[0]?.qpm ?? this._qpm ?? 120;
+        const unq = mm.sequences.unquantizeSequence(ns, qpm);
+        return mm.sequences.quantizeNoteSequence(unq, spq);
+      }
+      // no cuantizada → cuantiza directo
+      return mm.sequences.quantizeNoteSequence(ns, spq);
+    } catch {
       return ns;
     }
   }
 
-  /**
-   * Normaliza lista de NoteSequences, cuantizando cada una.
-   * @param {Object[]|Object} input  Uno o varios INoteSequence
-   * @returns {Object[]}             Array de NoteSequence cuantizadas
-   */
+  /** Fija tempo y SPQ en la cabecera (no toca las notas). */
+  _fixTempoAndSPQ(ns, spqOverride = null) {
+    const out = (this._mm?.sequences?.clone)
+      ? this._mm.sequences.clone(ns)
+      : JSON.parse(JSON.stringify(ns));
+    const spq = spqOverride ?? this._modelSpq ?? this._spq ?? 4;
+    out.tempos = [{ time: 0, qpm: this._qpm }];
+    out.quantizationInfo = { stepsPerQuarter: spq };
+    return out;
+  }
+
+  /** Garantiza totalTime/totalQuantizedSteps (al menos uno > 0). */
+  _ensureTotals(ns) {
+    const spq = ns?.quantizationInfo?.stepsPerQuarter || this._modelSpq || this._spq || 4;
+
+    // totalQuantizedSteps
+    if (!Number.isFinite(ns.totalQuantizedSteps)) {
+      let maxQ = 0;
+      const notes = ns.notes || [];
+      for (const n of notes) {
+        const qe = (n.quantizedEndStep != null)
+          ? n.quantizedEndStep
+          : (n.quantizedStartStep != null ? n.quantizedStartStep : 0);
+        if (qe > maxQ) maxQ = qe;
+      }
+      if (maxQ > 0) ns.totalQuantizedSteps = maxQ;
+    }
+
+    // totalTime
+    if (!Number.isFinite(ns.totalTime)) {
+      let maxEnd = 0;
+      const notes = ns.notes || [];
+      for (const n of notes) {
+        if (typeof n.endTime === 'number') maxEnd = Math.max(maxEnd, n.endTime);
+      }
+      if (maxEnd > 0) {
+        ns.totalTime = maxEnd;
+      } else if (Number.isFinite(ns.totalQuantizedSteps)) {
+        const secPerBeat = 60 / (this._qpm || 120);
+        const secPerStep = secPerBeat / spq;
+        ns.totalTime = ns.totalQuantizedSteps * secPerStep;
+      }
+    }
+
+    // Epsilon: el visualizador necesita uno “truthy”
+    if (!(ns.totalTime > 0) && !(ns.totalQuantizedSteps > 0)) {
+      if (ns.quantizationInfo?.stepsPerQuarter) ns.totalQuantizedSteps = 1;
+      else ns.totalTime = 0.001;
+    }
+    return ns;
+  }
+
+  /** Sanea: fija tempo/SPQ y asegura totales (sin mutar entrada). */
+  _sanitize(ns, { spq } = {}) {
+    const fixed = this._fixTempoAndSPQ(ns, spq);
+    return this._ensureTotals(fixed);
+  }
+
+  /** Normaliza lista de NS (cuantiza si procede). */
   _prepInputList(input) {
     const list = Array.isArray(input) ? input : [input];
     return list.map(ns => this._quantize(ns));
   }
 
-  /**
-   * Arregla el tempo y la cuantización de una NoteSequence.
-   * @param {Object} ns  INoteSequence
-   * @returns {Object}   NoteSequence arreglada
-   */
-  _fixTempoAndSPQ(ns) {
-  const out = JSON.parse(JSON.stringify(ns));
-  out.tempos = [{ time: 0, qpm: this._qpm }];
-  out.quantizationInfo = { stepsPerQuarter: this._spq };
-  return out;
-}
+  // -------------------------------
+  // splitIntoTracks (útil para Trio/Groove)
+  // -------------------------------
 
+  /**
+   * Agrupa por 'instrument' si existe; si no, por (isDrum, program).
+   * Devuelve [{ ns, name, program, isDrum }...], listo para App.loadTrack().
+   */
+  splitIntoTracks(ns) {
+    const spqSrc = ns?.quantizationInfo?.stepsPerQuarter || this._modelSpq || this._spq || 4;
+    const src    = this._sanitize(ns, { spq: spqSrc });
+    const notes  = Array.isArray(src.notes) ? src.notes : [];
+    if (!notes.length) return [];
+
+    const groups = new Map();
+    for (const n of notes) {
+      const key = Number.isInteger(n.instrument)
+        ? `inst:${n.instrument}`
+        : (n.isDrum ? 'drums' : `prog:${(Number.isInteger(n.program) ? n.program : 0)}`);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(n);
+    }
+
+    const out = [];
+    for (const [key, g] of groups.entries()) {
+      const cloned = {
+        notes: g.map(n => ({ ...n })),
+        tempos: [{ time: 0, qpm: this._qpm }],
+        quantizationInfo: { stepsPerQuarter: spqSrc }
+      };
+      this._ensureTotals(cloned);
+
+      const first   = g[0] || {};
+      const isDrum  = this._isGroove ? true : !!first.isDrum; // GrooVAE: todo batería
+      const program = Number.isInteger(first.program) ? first.program : 0;
+
+      let name;
+      if (isDrum || key === 'drums') {
+        name = 'Batería';
+      } else if (key.startsWith('inst:')) {
+        const idx = parseInt(key.split(':')[1], 10);
+        name = `Parte inst ${isNaN(idx) ? '?' : idx}`;
+      } else if (this._isTrio) {
+        // pista heurística en Trio (bajo/melodía según pitch)
+        const avgPitch = g.reduce((s, n) => s + (n.pitch ?? 60), 0) / g.length;
+        name = avgPitch < 52 ? 'Bajo' : 'Melodía';
+      } else {
+        name = 'Parte';
+      }
+
+      out.push({ ns: this._ensureTotals(cloned), name, program, isDrum });
+    }
+
+    // Orden recomendado
+    const score = (p) => p.isDrum ? 0 :
+      (p.name.toLowerCase().includes('bajo') ? 1 :
+       (p.name.toLowerCase().includes('melod') ? 2 : 3));
+    out.sort((a, b) => score(a) - score(b));
+
+    return out;
+  }
 
   // -------------------------------
   // API de generación / latente
   // -------------------------------
 
-  /**
-   * Genera muestras desde el prior del VAE.
-   * @param {number} numSamples  número de secuencias a generar
-   * @param {number} [temperature=0.5] suavizado (más alto => más aleatorio)
-   * @returns {Promise<Object[]>} Array de NoteSequence
-   */
+  /** Genera desde el prior. Devuelve NS saneadas. */
   async sample(numSamples = 1, temperature = 0.5) {
     await this.initialize();
-    return this._model.sample(
-      numSamples,
-      temperature,
-      this._controlArgs,      // p.ej. acordes si usas un VAE condicionado
-      this._spq,
-      this._qpm
-    );
+    let outs;
+    if (this._spqFromModel) {
+      outs = await this._model.sample(numSamples, temperature, this._controlArgs);
+    } else {
+      outs = await this._model.sample(
+        numSamples, temperature, this._controlArgs, this._spq, this._qpm
+      );
+    }
+    const spq = this._modelSpq ?? this._spq ?? 4;
+    return outs.map(ns => this._sanitize(ns, { spq }));
   }
 
-  /**
-   * Interpola entre 2 (o 4) secuencias en el espacio latente.
-   * @param {Object[]|Object} inputSequences  2 ó 4 NoteSequence(s)
-   * @param {number|number[]} numInterps      total de salidas (incluye reconstr. de extremos)
-   * @param {number} [temperature=0.5]
-   * @returns {Promise<Object[]>}             Array de NoteSequence interpoladas
-   */
+  /** Interpolación latente. */
   async interpolate(inputSequences, numInterps = 5, temperature = 0.5) {
     await this.initialize();
     const qList = this._prepInputList(inputSequences);
-    return this._model.interpolate(qList, numInterps, temperature, this._controlArgs);
+    const outs  = await this._model.interpolate(qList, numInterps, temperature, this._controlArgs);
+    const spq   = this._modelSpq ?? this._spq ?? 4;
+    return outs.map(ns => this._sanitize(ns, { spq }));
   }
 
-  /**
-   * Codifica una o varias NoteSequence al espacio latente Z (Tensor2D).
-   * Nota: devuelve un Tensor; recuerda .dispose() si haces muchas operaciones.
-   * @param {Object[]|Object} inputSequences
-   * @returns {Promise<import('@tensorflow/tfjs').Tensor2D>}
-   */
+  /** Encode → Tensor2D (recuerda .dispose() si haces muchas). */
   async encode(inputSequences) {
     await this.initialize();
     const qList = this._prepInputList(inputSequences);
     return this._model.encode(qList, this._controlArgs);
   }
 
-  /**
-   * Decodifica vectores latentes Z a NoteSequence.
-   * @param {import('@tensorflow/tfjs').Tensor2D} z  forma [batch, zDim]
-   * @param {number} [temperature]                   si no se da, usa argmax
-   * @returns {Promise<Object[]>}                    Array de NoteSequence
-   */
+  /** Decode desde latente. Devuelve NS saneadas. */
   async decode(z, temperature) {
     await this.initialize();
-    return this._model.decode(z, temperature, this._controlArgs, this._spq, this._qpm);
+    let outs;
+    if (this._spqFromModel) {
+      outs = await this._model.decode(z, temperature, this._controlArgs);
+    } else {
+      outs = await this._model.decode(
+        z, temperature, this._controlArgs, this._spq, this._qpm
+      );
+    }
+    const spq = this._modelSpq ?? this._spq ?? 4;
+    return outs.map(ns => this._sanitize(ns, { spq }));
   }
 
-  /**
-   * Genera variaciones "similares" a una entrada (interpola en latente con ruido).
-   * @param {Object} inputSequence  NoteSequence base
-   * @param {number} numSamples     cuántas variaciones
-   * @param {number} similarity     0..1 (1 = muy similar, 0 = más diferente)
-   * @param {number} [temperature=0.5]
-   * @returns {Promise<Object[]>}
-   */
+  /** Variaciones similares a una entrada. */
   async similar(inputSequence, numSamples = 4, similarity = 0.7, temperature = 0.5) {
     await this.initialize();
-    const q = this._quantize(inputSequence);
-    return this._model.similar(q, numSamples, similarity, temperature, this._controlArgs);
+    const qList = this._prepInputList(inputSequence);
+    const q     = Array.isArray(qList) ? qList[0] : qList; // 1 sola
+    const outs  = await this._model.similar(q, numSamples, similarity, temperature, this._controlArgs);
+    const spq   = this._modelSpq ?? this._spq ?? 4;
+    return outs.map(ns => this._sanitize(ns, { spq }));
   }
 
   // -------------------------------
-  // QoL (Quality of Life)
+  // QoL
   // -------------------------------
-
-  /** Cambia SPQ (p.ej., para cuadrícula más fina) */
   setStepsPerQuarter(spq) { this._spq = spq; }
-
-  /** Cambia tempo QPM/BPM (repercute en sample/decode) */
-  setQpm(qpm) { this._qpm = qpm; }
-
-  /** Devuelve SPQ/QPM actuales (útil para paneles de UI). */
+  setQpm(qpm)            { this._qpm = qpm; }
   getConfig() {
-    return { stepsPerQuarter: this._spq, qpm: this._qpm };
+    return {
+      stepsPerQuarter: this._spq,
+      qpm: this._qpm,
+      spqFromModel: this._spqFromModel,
+      modelSpq: this._modelSpq,
+      isTrio: this._isTrio,
+      isGroove: this._isGroove
+    };
   }
-
-  
 }
 
-// ----------------------------------------------------------------------------
-// Ejemplos de integración (solo como guía, no se ejecutan aquí):
-//
-// 1) SAMPLE simple a la UI genérica:
-//    const [ns] = await vae.sample(1, 0.9);
-//    App.loadTrack(ns, { name: 'VAE sample', program: 0 });
-//
-// 2) INTERPOLACIÓN entre dos melodías existentes (p.ej., cargadas por MIDI):
-//    const outs = await vae.interpolate([melA, melB], 8, 0.7);
-//    // outs[0] ≈ reconstrucción de melA, outs[7] ≈ reconstrucción de melB
-//    App.replaceMain(outs[0]); // o mostrar una lista y elegir
-//
-// 3) VARIACIONES similares a una entrada:
-//    const vars = await vae.similar(melody, 4, 0.8, 0.6);
-//    vars.forEach((ns, i) => App.loadTrack(ns, { name: `Var #${i+1}`, program: 0 }));
-//
-// 4) ENCODE/DECODE manual (avanzado en el taller):
-//    const z = await vae.encode(melody);
-//    // ... manipular z con tfjs ...
-//    const outSeqs = await vae.decode(z, 0.6);
-//    z.dispose();
-// ----------------------------------------------------------------------------
+// -------------------------------
+// Variantes específicas (a nivel semántico)
+// -------------------------------
+
+/** Melody: usa SPQ/QPM del taller (no forzamos SPQ del modelo). */
+export class MelodyVaeService extends MusicVaeService {
+  constructor(opts = {}) {
+    super({ ...opts, preferModelSpq: false });
+  }
+}
+
+/** Trio: por defecto respetamos el SPQ del modelo si lo declara. */
+export class TrioVaeService extends MusicVaeService {
+  constructor(opts = {}) {
+    super({ ...opts, preferModelSpq: true });
+  }
+}
+
+/** GrooVAE (drums): por defecto respetamos el SPQ del modelo y marcamos batería. */
+export class GrooveVaeService extends MusicVaeService {
+  constructor(opts = {}) {
+    super({ ...opts, preferModelSpq: true });
+  }
+}
+
+// -------------------------------
+// Factory opcional (azúcar sintáctico)
+// -------------------------------
+/**
+ * Crea un “suite” de 3 VAEs a partir de tus checkpoints.
+ * @example
+ *   const vae = makeVaeSuite(CHECKPOINTS.musicvae, { qpm: 120, stepsPerQuarter: 4 });
+ *   await vae.melody.initialize(); const [ns] = await vae.melody.sample();
+ */
+export function makeVaeSuite(checkpoints, common = {}) {
+  const { melody, trio, groovae } = checkpoints || {};
+  return {
+    melody : new MelodyVaeService({ checkpointURL: melody,  ...common }),
+    trio   : new TrioVaeService({   checkpointURL: trio,    ...common }),
+    groovae: new GrooveVaeService({ checkpointURL: groovae, ...common })
+  };
+}

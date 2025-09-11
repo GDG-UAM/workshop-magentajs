@@ -133,7 +133,10 @@ export const App = (() => {
   function onDownload() {
     const active = state.tracks
       .filter(t => t.isActive)
-      .map(t => setInstrument(t.ns, t.program ?? 0, t.isDrum ?? false));
+      .map(t => t.preserveInstruments
+        ? ensureNsMeta(t.ns)
+        : setInstrument(t.ns, t.program ?? 0, t.isDrum ?? false)
+      );
 
     if (active.length === 0) {
       alert('No hay pistas activas para descargar.');
@@ -154,7 +157,10 @@ export const App = (() => {
   function onTrackUpdate() {
     let active = state.tracks
       .filter(t => t.isActive)
-      .map(t => setInstrument(t.ns, t.program ?? 0, t.isDrum ?? false));
+      .map(t => t.preserveInstruments
+        ? ensureNsMeta(t.ns) // respeta program/isDrum por nota
+        : setInstrument(t.ns, t.program ?? 0, t.isDrum ?? false)
+      );
 
     if (active.length === 0) {
       try { player.stop(); } catch {}
@@ -182,7 +188,9 @@ export const App = (() => {
 
     const arranged = idxs.map(i => {
       const t = state.tracks[i];
-      return setInstrument(t.ns, t.program ?? 0, t.isDrum ?? false);
+      return t.preserveInstruments
+        ? ensureNsMeta(t.ns)
+        : setInstrument(t.ns, t.program ?? 0, t.isDrum ?? false);
     });
 
     const combined = merge(arranged);
@@ -230,8 +238,20 @@ export const App = (() => {
   // -------------------------------
   // API principal
   // -------------------------------
-  function loadTrack(ns, { name = 'Track', program = 0, isDrum = false } = {}) {
-    state.tracks.push({ ns: ensureNsMeta(ns), name, program, isDrum, isActive: true });
+  function loadTrack(
+    ns,
+    { name = 'Track', program = 0, isDrum = false, preserveInstruments = false } = {}
+  ) {
+    state.tracks.push({
+      ns: ensureNsMeta(ns),
+      name,
+      program,
+      isDrum,
+      isActive: true,
+      preserveInstruments
+    });
+    console.log(`Pista añadida: ${name} (programa ${program}, isDrum=${isDrum})`);
+    console.log(state.tracks);
     onTrackUpdate();
   }
 
@@ -300,7 +320,17 @@ export const App = (() => {
   }
 
   async function concatCreateNew(indexes, { label } = {}) {
-    const seqs = indexes.map(i => state.tracks[i]?.ns).filter(Boolean);
+    const seqs = indexes
+      .map(i => {
+        const t = state.tracks[i];
+        if (!t?.ns) return null;
+        // Si la pista ya preserva instrumentos, úsala tal cual.
+        // Si no, fija program/isDrum según sus controles actuales.
+        return t.preserveInstruments
+          ? ensureNsMeta(t.ns)
+          : setInstrument(t.ns, t.program ?? 0, t.isDrum ?? false);
+      })
+      .filter(Boolean);
     if (seqs.length < 2) return;
 
     const first = seqs[0];
@@ -309,6 +339,11 @@ export const App = (() => {
 
     const ns = concatOnGrid(seqs, { qpm, spq, mm: window.mm });
     loadTrack(ensureNsMeta(ns), { name: label || 'Concatenación' });
+    // MUY IMPORTANTE: preservar instrumentos por nota en la pista resultante
+    loadTrack(ensureNsMeta(ns), {
+      name: label || 'Concatenación',
+      preserveInstruments: true
+    });
   }
 
   function labelFromIndex(idx) {

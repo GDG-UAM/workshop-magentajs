@@ -1,7 +1,7 @@
 
 // Parámetros recomendados del taller (usar en sandbox y UI genérica)
 export const WORKSHOP = {
-  QPM: 120,
+  QPM: 90,
   SPQ: 6,
 };
 
@@ -11,7 +11,7 @@ export const CHECKPOINTS = {
     // Melody VAE (4 compases, versión cuantizada pequeña → carga rápida)
     melody: 'https://storage.googleapis.com/magentadata/js/checkpoints/music_vae/mel_4bar_small_q2',
     // ideal para generar música con 3 instrumentos (Guitarra-Batería-Bajo)
-    trio: 'https://storage.googleapis.com/magentadata/js/checkpoints/music_vae/trio_16bar_xl',
+    trio: 'https://storage.googleapis.com/magentadata/js/checkpoints/music_vae/trio_4bar',
     // ideal para generar ritmos de Bateria
     groovae: 'https://storage.googleapis.com/magentadata/js/checkpoints/music_vae/groovae_4bar'
   },
