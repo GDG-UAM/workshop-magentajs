@@ -22,7 +22,9 @@ export const CHECKPOINTS = {
     melody: 'https://storage.googleapis.com/magentadata/js/checkpoints/music_rnn/melody_rnn',
   },
   // Coconet (corales de Bach)
-  coconet: 'https://storage.googleapis.com/magentadata/js/checkpoints/coconet/bach'
+  coconet: {
+    bach: 'https://storage.googleapis.com/magentadata/js/checkpoints/coconet/bach'
+  }
 };
 
 export default {
