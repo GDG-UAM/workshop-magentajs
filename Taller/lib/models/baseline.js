@@ -1,146 +1,139 @@
-// Generadores “sin modelo”: escalas, arpegios y escalas musicales reales
-
-import { WORKSHOP } from '../config/constants.js'; // ← QPM del taller
+// Generadores “sin modelo”: escalas, arpegios y utilidades
+import { WORKSHOP } from '../config/constants.js'; // QPM/SPQ del taller
 
 const DEFAULT_QPM = WORKSHOP?.QPM ?? 120;
+const DEFAULT_SPQ = WORKSHOP?.SPQ ?? 4;
 
-// Helpers
+// ----------------- Helpers de tiempo -----------------
 const beatsToSeconds = (beats, qpm) => (60 / qpm) * beats;
+const secondsToBeats = (sec, qpm) => (qpm / 60) * sec;
+const beatsToSteps  = (beats, spq) => Math.round(beats * spq);
 
-/**
- * Normaliza la duración de cada nota a segundos.
- * - Si pasas durBeats (en negras): usa QPM para convertir a segundos.
- * - Si pasas dur (segundos): se usa tal cual.
- * - Si no pasas nada: 0.5 s por nota (compatibilidad con el código antiguo).
- */
+// Normaliza duración de cada nota a SEGUNDOS
 function normalizeDurSeconds({ dur, durBeats, qpm }) {
   if (typeof durBeats === 'number') return beatsToSeconds(durBeats, qpm);
-  if (typeof dur === 'number') return dur;
+  if (typeof dur === 'number')     return dur;
   return 0.5;
 }
 
-/**
- * Escala aritmética simple (no “mayor real”):
- * Sube 'length' notas con saltos fijos 'step' (en semitonos).
- * Útil como baseline muy controlable.
- */
+// Añade cuantización + mínimos de metadatos a una NS que ya está en segundos
+function enrichWithQuant(ns, { qpm = DEFAULT_QPM, spq = DEFAULT_SPQ } = {}) {
+  const out = JSON.parse(JSON.stringify(ns || { notes: [] }));
+  out.notes = Array.isArray(out.notes) ? out.notes : [];
+  out.tempos = [{ time: 0, qpm }];
+  out.quantizationInfo = { stepsPerQuarter: spq };
+
+  let maxEndTime = 0;
+  let maxStep    = 0;
+
+  for (const n of out.notes) {
+    const startBeats = secondsToBeats(n.startTime ?? 0, qpm);
+    const endBeats   = secondsToBeats(n.endTime   ?? 0, qpm);
+    const qs = beatsToSteps(startBeats, spq);
+    const qe = beatsToSteps(endBeats,   spq);
+    n.quantizedStartStep = qs;
+    n.quantizedEndStep   = qe;
+    if (n.endTime > maxEndTime) maxEndTime = n.endTime;
+    if (qe > maxStep) maxStep = qe;
+  }
+
+  // Totales mínimos para el visualizador/reproductor
+  if (!(out.totalTime > 0)) out.totalTime = maxEndTime;
+  if (!(out.totalQuantizedSteps > 0)) out.totalQuantizedSteps = maxStep || (out.totalTime > 0 ? beatsToSteps(secondsToBeats(out.totalTime, qpm), spq) : 0);
+
+  // Si sigue sin nada (caso extremo), mete un mínimo
+  if (!(out.totalTime > 0) && !(out.totalQuantizedSteps > 0)) {
+    out.totalTime = 0.001;
+    out.totalQuantizedSteps = 1;
+  }
+  return out;
+}
+
+/* ========================================================================== */
+/*                                   Makers                                   */
+/* ========================================================================== */
+
+// 1) Escala aritmética simple (saltos fijos en semitonos)
 export function makeScale({
-  tonic = 60,        // C4
-  length = 16,       // nº de notas
-  step = 2,          // semitonos por paso (2 = tono)
-  dur,               // segundos (opcional)
-  durBeats,          // beats (opcional) — p.ej. 0.25 = semicorchea
+  tonic = 60,
+  length = 16,
+  step = 2,
+  dur,
+  durBeats,
   velocity = 96,
   program = 0,
-  qpm = DEFAULT_QPM
+  qpm = DEFAULT_QPM,
+  spq = DEFAULT_SPQ
 } = {}) {
   const noteDur = normalizeDurSeconds({ dur, durBeats, qpm });
   let t = 0;
   const notes = [];
   for (let i = 0; i < length; i++) {
-    notes.push({
-      pitch: tonic + i * step,
-      startTime: t,
-      endTime: t + noteDur,
-      velocity,
-      program
-    });
+    notes.push({ pitch: tonic + i * step, startTime: t, endTime: t + noteDur, velocity, program });
     t += noteDur;
   }
-  return { notes, totalTime: t, tempos: [{ time: 0, qpm }] };
+  return enrichWithQuant({ notes, totalTime: t, tempos: [{ time: 0, qpm }] }, { qpm, spq });
 }
 
-/**
- * Arpegio: recorre el acorde en orden y repítelo 'cycles' veces.
- */
+// 2) Arpegio de un acorde
 export function makeArpeggio({
-  chord = [60, 64, 67, 72], // C-E-G-C
+  chord = [60, 64, 67, 72],
   cycles = 4,
-  dur,                      // segundos (opcional)
-  durBeats,                 // beats (opcional)
+  dur,
+  durBeats,
   velocity = 96,
   program = 0,
-  qpm = DEFAULT_QPM
+  qpm = DEFAULT_QPM,
+  spq = DEFAULT_SPQ
 } = {}) {
   const noteDur = normalizeDurSeconds({ dur, durBeats, qpm });
   let t = 0;
   const notes = [];
   for (let c = 0; c < cycles; c++) {
     for (const p of chord) {
-      notes.push({
-        pitch: p,
-        startTime: t,
-        endTime: t + noteDur,
-        velocity,
-        program
-      });
+      notes.push({ pitch: p, startTime: t, endTime: t + noteDur, velocity, program });
       t += noteDur;
     }
   }
-  return { notes, totalTime: t, tempos: [{ time: 0, qpm }] };
+  return enrichWithQuant({ notes, totalTime: t, tempos: [{ time: 0, qpm }] }, { qpm, spq });
 }
 
-/**
- * Escala mayor REAL (patrón: 2-2-1-2-2-2-1), por 'octaves' octavas.
- * - Empieza en 'tonic' e incluye el último grado (tónica superior).
- * - Por defecto durBeats=0.25 → semicorchea, ligada a QPM.
- */
+// 3) Escala mayor REAL (2-2-1-2-2-2-1) por octavas
 export function makeMajorScale({
-  tonic = 60,        // C4
-  octaves = 1,       // nº de octavas a cubrir
-  dur,               // segundos (opcional)
-  durBeats = 0.25,   // beats (opcional); por defecto semicorchea
+  tonic = 60,
+  octaves = 1,
+  dur,
+  durBeats = 0.25,
   velocity = 96,
   program = 0,
-  qpm = DEFAULT_QPM
+  qpm = DEFAULT_QPM,
+  spq = DEFAULT_SPQ
 } = {}) {
-  const MAJOR_PATTERN = [2, 2, 1, 2, 2, 2, 1]; // T T S T T T S
+  const MAJOR = [2, 2, 1, 2, 2, 2, 1];
   const noteDur = normalizeDurSeconds({ dur, durBeats, qpm });
 
   let t = 0;
   let pitch = tonic;
   const notes = [];
-
-  // Primera nota (tónica)
   notes.push({ pitch, startTime: t, endTime: t + noteDur, velocity, program });
   t += noteDur;
 
-  // Recorre el patrón 'octaves' veces (incluye la tónica superior al final)
   for (let o = 0; o < octaves; o++) {
-    for (const inc of MAJOR_PATTERN) {
+    for (const inc of MAJOR) {
       pitch += inc;
       notes.push({ pitch, startTime: t, endTime: t + noteDur, velocity, program });
       t += noteDur;
     }
   }
-
-  return { notes, totalTime: t, tempos: [{ time: 0, qpm }] };
+  return enrichWithQuant({ notes, totalTime: t, tempos: [{ time: 0, qpm }] }, { qpm, spq });
 }
 
-
-/* -------------------------------------------------------------------------- */
-/*                  NUEVAS UTILIDADES PARA NOTAS "A MEDIDA"                   */
-/* -------------------------------------------------------------------------- */
-
-/**
- * 1) makeMelody — Secuencial
- * Recibe una lista de pitches (números) o de objetos { pitch, durBeats?, dur?, velocity?, program? }
- * y los coloca uno detrás de otro, acumulando el tiempo.
- *
- * Ejemplos:
- *  - makeMelody({ pitches: [60, 62, 64, 65], durBeats: 0.25 })
- *  - makeMelody({
- *      pitches: [
- *        { pitch: 60, durBeats: 0.5 },
- *        { pitch: 62, durBeats: 0.25, velocity: 110 },
- *        { pitch: 64, dur: 0.2 } // en segundos
- *      ]
- *    })
- */
+// 4) Melodía secuencial (pitches o eventos)
 export function makeMelody({
-  pitches = [],        // number[] o Array<{pitch, durBeats?, dur?, velocity?, program?}>
-  durBeats = 0.25,     // duración por defecto (en beats) si el evento no la especifica
+  pitches = [],          // number[] o { pitch, durBeats?, dur?, velocity?, program? }[]
+  durBeats = 0.25,
   qpm = DEFAULT_QPM,
+  spq = DEFAULT_SPQ,
   defaultVelocity = 96,
   defaultProgram = 0
 } = {}) {
@@ -149,9 +142,7 @@ export function makeMelody({
 
   for (const ev of pitches) {
     const isNumber = typeof ev === 'number';
-    //  Si es número, lo usa directamente; si es objeto, toma la propiedad pitch
     const pitch = isNumber ? ev : ev.pitch;
-    // Si no hay pitch válido, salta al siguiente elemento.
     if (typeof pitch !== 'number') continue;
 
     const velocity = isNumber ? defaultVelocity : (ev.velocity ?? defaultVelocity);
@@ -164,30 +155,14 @@ export function makeMelody({
     t += durSec;
   }
 
-  return { notes, totalTime: t, tempos: [{ time: 0, qpm }] };
+  return enrichWithQuant({ notes, totalTime: t, tempos: [{ time: 0, qpm }] }, { qpm, spq });
 }
 
-/**
- * 2) makeAbsoluteSequence — Cronológico (start/dur o start/end exactos)
- * Recibe eventos con tiempos absolutos en beats o en segundos.
- * Precedencia: si hay tiempos en segundos, se usan; si no, se usan los de beats.
- *
- * Evento mínimo: { pitch, startBeats, durBeats }  (o startSec/dur)
- * Alternativa:   { pitch, startBeats, endBeats }  (o startSec/endSec)
- *
- * Ejemplo:
- *  makeAbsoluteSequence({
- *    events: [
- *      { pitch: 60, startBeats: 0,   durBeats: 1   }, // negra
- *      { pitch: 64, startBeats: 1,   durBeats: 0.5 }, // corchea
- *      { pitch: 67, startBeats: 1.5, durBeats: 0.5 }
- *    ],
- *    qpm: WORKSHOP.QPM
- *  })
- */
+// 5) Secuencia absoluta (eventos con start/dur o start/end en beats/segundos)
 export function makeAbsoluteSequence({
-  events = [],         // Array<{ pitch, startBeats?, durBeats?, endBeats?, startSec?, dur?, endSec?, velocity?, program? }>
+  events = [],           // { pitch, startBeats?, durBeats?, endBeats?, startSec?, dur?, endSec?, velocity?, program? }[]
   qpm = DEFAULT_QPM,
+  spq = DEFAULT_SPQ,
   defaultVelocity = 96,
   defaultProgram = 0,
   defaultDurBeats = 0.25
@@ -201,45 +176,27 @@ export function makeAbsoluteSequence({
     const velocity = e.velocity ?? defaultVelocity;
     const program  = e.program  ?? defaultProgram;
 
-    // Preferimos valores en segundos si están presentes
     let startTime, endTime;
-
     if (typeof e.startSec === 'number') {
       startTime = e.startSec;
-      if (typeof e.endSec === 'number') {
-        endTime = e.endSec;
-      } else {
-        const durSec = typeof e.dur === 'number'
-          ? e.dur
-          : beatsToSeconds(e.durBeats ?? defaultDurBeats, qpm);
-        endTime = startTime + durSec;
-      }
+      endTime = (typeof e.endSec === 'number')
+        ? e.endSec
+        : startTime + (typeof e.dur === 'number' ? e.dur : beatsToSeconds(e.durBeats ?? defaultDurBeats, qpm));
     } else if (typeof e.startBeats === 'number') {
       startTime = beatsToSeconds(e.startBeats, qpm);
-      if (typeof e.endBeats === 'number') {
-        endTime = beatsToSeconds(e.endBeats, qpm);
-      } else {
-        const durSec = typeof e.dur === 'number'
-          ? e.dur
-          : beatsToSeconds(e.durBeats ?? defaultDurBeats, qpm);
-        endTime = startTime + durSec;
-      }
+      endTime = (typeof e.endBeats === 'number')
+        ? beatsToSeconds(e.endBeats, qpm)
+        : startTime + (typeof e.dur === 'number' ? e.dur : beatsToSeconds(e.durBeats ?? defaultDurBeats, qpm));
     } else {
-      // Si no hay start, lo ignoramos (no sabemos dónde colocarlo)
-      continue;
+      continue; // evento inválido
     }
-
-    // Sanitiza
     if (!(endTime > startTime)) continue;
 
     notes.push({ pitch, startTime, endTime, velocity, program });
   }
 
-  // totalTime = fin máximo
   const totalTime = notes.reduce((mx, n) => Math.max(mx, n.endTime || 0), 0);
-
-  // Ordena por tiempo de inicio (opcional pero ayuda al visualizador)
   notes.sort((a, b) => a.startTime - b.startTime);
 
-  return { notes, totalTime, tempos: [{ time: 0, qpm }] };
+  return enrichWithQuant({ notes, totalTime, tempos: [{ time: 0, qpm }] }, { qpm, spq });
 }

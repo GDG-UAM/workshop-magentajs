@@ -6,51 +6,49 @@ import { buildTransport, buildTrim, buildSaveLoad, buildTracks, bindTitleInput }
 import { mergeFromState, concatenate, merge, setInstrument } from '../lib/core/sequences.js';
 import { concatOnGrid } from '../lib/core/concat.js';
 
-// SPQ (Steps Per Quarter) = número de subdivisiones (steps) en una negra.
-// QPM (Quarter notes Per Minute) = número de negras por minuto (tempo).
+// SPQ (Steps Per Quarter) = subdivisiones por negra.
+// QPM (Quarter notes Per Minute) = negras por minuto (tempo).
 
 export const App = (() => {
-  // Estado: añadir selección A/B
+  // --- Estado global ---
   const state = {
     title: '',
-    // current/original: lo que se está mostrando/reproduciendo ahora y la copia base (para restaurar tras un trim).
-    // Trim = recortar un fragmento temporal de una NoteSequence, usando un rango [startSec, endSec).
-    current: null, // La secuencia de notas que se está reproduciendo o visualizando actualmente. Suele ser una mezcla de las pistas activas.
-    original: null,
-    tracks: [], // Un array que almacena todas las pistas de música que se han generado o cargado 
-    // track = [{ ns, name, program, isDrum, isActive }]
+    current: null,     // mezcla de pistas activas visualizada/reproducida
+    original: null,    // copia base para restaurar tras trim
+    tracks: [],        // [{ ns, name, program, isDrum, isActive }]
     qpm: 120,
-    // Selección de pistas (A/B) para acciones de dos pistas
-    concatSelection: { a: null, b: null },
-    // Si true, al seleccionar A y B se unirá en paralelo automáticamente
+    concatSelection: { a: null, b: null }, // selección A/B
     mergeAwaiting: false
   };
 
-  // Son singletons: player, viz. Esto significa que solo hay una instancia de cada uno en toda la aplicación (un único reproductor y un único visualizador coordinados).
+  // Instancias únicas
   let player, viz;
+  // Reproductor de pre-escucha (trim audition)
+  let auditionPlayer = null;
 
-  // Normalizacion de cuadrícula
+  // -------------------------------
+  // Normalización de cuadrícula
+  // -------------------------------
   function toUniformGrid(seqs) {
-    // Si alguna secuencia está cuantizada, usamos su SPQ como referencia
+    // Detecta un SPQ de referencia si alguna está cuantizada
     let spq = null;
     for (const s of seqs) {
       const steps = s?.quantizationInfo?.stepsPerQuarter;
       if (Number.isInteger(steps) && steps > 0) { spq = steps; break; }
     }
-    if (!spq) return seqs; // ninguna cuantizada → no tocamos nada
+    if (!spq) return seqs;
 
     const mm = window.mm;
     const qpmFallback = (seqs.find(s => s?.tempos?.length)?.tempos?.[0]?.qpm) ?? 120;
 
     return seqs.map(s => {
-      // cur = SPQ actual de s (si existe).
       const cur = s?.quantizationInfo?.stepsPerQuarter;
       try {
         if (!cur) {
-          // no cuantizada → cuantizar directo
+          // no cuantizada → cuantiza directo a SPQ objetivo
           return window.__lib.quantize(s, spq);
         }
-        if (cur === spq) return s; // ya ok
+        if (cur === spq) return s;
         // distinta cuadrícula → des-cuantizar y re-cuantizar
         const qpm = s?.tempos?.[0]?.qpm ?? qpmFallback;
         const unq = mm.sequences.unquantizeSequence(s, qpm);
@@ -61,44 +59,73 @@ export const App = (() => {
     });
   }
 
-function ensureNsMeta(ns) {
-  const copy = window.mm?.sequences?.clone
-    ? window.mm.sequences.clone(ns)
-    : JSON.parse(JSON.stringify(ns));
+  // -------------------------------
+  // Metadatos mínimos para el viz/reproductor
+  // -------------------------------
+  function ensureNsMeta(ns) {
+    // Clonado seguro
+    const copy = window.mm?.sequences?.clone
+      ? window.mm.sequences.clone(ns)
+      : JSON.parse(JSON.stringify(ns || {}));
 
-  const notes = copy.notes || [];
+    // Asegura arrays
+    copy.notes = Array.isArray(copy.notes) ? copy.notes : [];
 
-  // 1) totalTime (si hay tiempos en segundos)
-  if (copy.totalTime == null) {
-    const maxEnd = notes.reduce((mx, n) => Math.max(mx, n.endTime ?? 0), 0);
-    if (maxEnd > 0) copy.totalTime = maxEnd;
-  }
+    // 1) tempos (conserva qpm existente si lo hay)
+    const qpm = copy?.tempos?.[0]?.qpm ?? 120;
+    copy.tempos = [{ time: 0, qpm }];
 
-  // 2) totalQuantizedSteps (aunque falte quantizationInfo)
-  const maxQStep = notes.reduce(
-    (mx, n) => Math.max(mx, n.quantizedEndStep ?? n.quantizedStartStep ?? 0),
-    0
-  );
-  if (maxQStep > 0 && copy.totalQuantizedSteps == null) {
-    copy.totalQuantizedSteps = maxQStep;
-    // Asegura quantizationInfo si falta (SPQ por defecto = 4)
-    if (!copy.quantizationInfo || !copy.quantizationInfo.stepsPerQuarter) {
-      copy.quantizationInfo = { stepsPerQuarter: 4 };
+    // 2) SPQ de referencia
+    const spq = copy?.quantizationInfo?.stepsPerQuarter ?? 4;
+
+    // 3) totalQuantizedSteps si falta (mirando quantizedStart/EndStep)
+    if (!Number.isFinite(copy.totalQuantizedSteps)) {
+      let maxQ = 0;
+      for (const n of copy.notes) {
+        const qe = (n.quantizedEndStep != null)
+          ? n.quantizedEndStep
+          : (n.quantizedStartStep != null ? n.quantizedStartStep : 0);
+        if (qe > maxQ) maxQ = qe;
+      }
+      if (maxQ > 0) copy.totalQuantizedSteps = maxQ;
     }
+
+    // 4) totalTime si falta: primero desde endTime; si no, de steps → segundos
+    if (!Number.isFinite(copy.totalTime)) {
+      let maxEnd = 0;
+      for (const n of copy.notes) {
+        if (typeof n.endTime === 'number') maxEnd = Math.max(maxEnd, n.endTime);
+      }
+      if (maxEnd > 0) {
+        copy.totalTime = maxEnd;
+      } else if (Number.isFinite(copy.totalQuantizedSteps)) {
+        const secPerBeat = 60 / qpm;
+        const secPerStep = secPerBeat / spq;
+        copy.totalTime = copy.totalQuantizedSteps * secPerStep;
+      }
+    }
+
+    // 5) Si sigue sin haber nada, pon mínimos para contentar al viz
+    if (!(copy.totalTime > 0) && !(copy.totalQuantizedSteps > 0)) {
+      if (copy.quantizationInfo?.stepsPerQuarter || spq) {
+        copy.quantizationInfo = { stepsPerQuarter: spq || 4 };
+        copy.totalQuantizedSteps = 1;
+      } else {
+        copy.totalTime = 0.001; // evita error del visualizador
+      }
+    }
+
+    // 6) Si hay steps pero falta quantizationInfo, añádela
+    if (Number.isFinite(copy.totalQuantizedSteps) && !copy.quantizationInfo?.stepsPerQuarter) {
+      copy.quantizationInfo = { stepsPerQuarter: spq || 4 };
+    }
+
+    return copy;
   }
 
-  // 3) tempos mínimo
-  if (!copy.tempos || copy.tempos.length === 0) {
-    copy.tempos = [{ time: 0, qpm: 120 }];
-  }
-
-  return copy;
-}
-
-
-
-  // --- Handlers requeridos por la UI ---
-
+  // -------------------------------
+  // Handlers de UI
+  // -------------------------------
   function onLoadSequence(ns, meta = {}) {
     const name = meta.name || 'Importado';
     const program = meta.program ?? 0;
@@ -107,7 +134,6 @@ function ensureNsMeta(ns) {
   }
 
   function onDownload() {
-    // Prepara una NoteSequence con todas las pistas activas (unidas en paralelo)
     const active = state.tracks
       .filter(t => t.isActive)
       .map(t => setInstrument(t.ns, t.program ?? 0, t.isDrum ?? false));
@@ -116,49 +142,36 @@ function ensureNsMeta(ns) {
       alert('No hay pistas activas para descargar.');
       return;
     }
-    // Si solo hay una pista activa, la usa tal cual.
-    // Si hay varias, las une en paralelo usando la función merge.
     const ns = active.length === 1 ? active[0] : merge(active);
     const filename = (state.title?.trim() || 'magenta_sandbox') + '.mid';
     window.__lib.download(ns, filename);
   }
 
   function onToggleTrack(index) {
-    // Permite activar o desactivar una pista musical en la lista de pistas de la aplicación. Es decir, alterna el estado de una pista entre "activa" y "inactiva".
-    const t = state.tracks[index]; // Obtener la pista correspondiente
-    if (!t) return; // Si no existe la pista (por ejemplo, el índice es incorrecto), termina la función y no hace nada.
+    const t = state.tracks[index];
+    if (!t) return;
     t.isActive = !t.isActive;
     onTrackUpdate();
   }
 
-  /* Actualiza la pista activa
-    - Si no hay pistas activas, detiene la reproducción y limpia el visualizador
-    - Si hay pistas activas, garantiza los metadatos y llama a replaceMain()
-    para reproducir y visualizar
-  */
   function onTrackUpdate() {
-      let active = state.tracks
-        .filter(t => t.isActive)
-        .map(t => setInstrument(t.ns, t.program ?? 0, t.isDrum ?? false));
+    let active = state.tracks
+      .filter(t => t.isActive)
+      .map(t => setInstrument(t.ns, t.program ?? 0, t.isDrum ?? false));
 
     if (active.length === 0) {
       try { player.stop(); } catch {}
-      viz.render({ notes: [], totalTime: 0 }); // limpia el visualizador
+      viz.render({ notes: [], totalTime: 0.001 }); // limpia sin romper el viz
       state.current = null;
       return;
     }
 
-    active = toUniformGrid(active); // unificar SPQ si aplica
+    active = toUniformGrid(active);
     const merged = active.length === 1 ? active[0] : merge(active);
-    const ns = ensureNsMeta(merged); // garantizamos los campos
-    replaceMain(ns); // hace render + play con QPM actual
+    const ns = ensureNsMeta(merged);
+    replaceMain(ns);
   }
 
-  /*
-    Une las pistas seleccionadas A y B en paralelo, creando una nueva pista.
-    Si no hay A y B seleccionadas, une todas las pistas activas. <- (Jose): No es cierto, no hace nada // TO DO 
-    Si hay menos de 2 pistas para unir, no hace nada.
-  */
   function onMergeTracks() {
     const { a, b } = state.concatSelection || {};
     let idxs = [];
@@ -175,166 +188,106 @@ function ensureNsMeta(ns) {
       return setInstrument(t.ns, t.program ?? 0, t.isDrum ?? false);
     });
 
-    // Ejemplo:
-    // idxs = [0, 2] (índices de pistas activas)
-    // arranged = [setInstrument(pista0), setInstrument(pista2)]
-
-    const combined = merge(arranged); // Une en paralelo
+    const combined = merge(arranged);
     loadTrack(combined, { name: 'Unión (paralelo)' });
     state.concatSelection = { a: null, b: null };
     onTrackUpdate();
   }
 
-  // --- Funciones principales expuestas en App ---
-  /*
-  La función mount:
-      - Inicializa el visualizador y el reproductor.
-      - Construye todos los paneles y controles de la interfaz.
-      - Enlaza los handlers para que la UI responda a las acciones del usuario.
-      - Expone las funciones principales para su uso global.
-  */
-  // Monta la UI y enlaza los handlers
+  // -------------------------------
+  // Montaje de la app
+  // -------------------------------
   function mount() {
-    // 1) Crear VISUALIZADOR (piano-roll en el <svg id="visualizer">)
     viz = new Roll(document.getElementById('visualizer'));
+    player = new LoopingPlayer({ onPosition: (sec) => viz.updateCursor(sec) });
 
-    // 2) Crear PLAYER (reproductor) y sincronizar el cursor del roll con el tiempo
-    player = new LoopingPlayer({
-      onPosition: (sec) => viz.updateCursor(sec)
-    });
-
-    // 3) Enlazar el título de la canción al estado (two-way-ish)
     bindTitleInput('#songTitle', state);
-
-    // 4) Construir los controles de transporte (Play/Pause/Loop, etc.)
     buildTransport('#transport', player, state);
-
-    // 5) Construir el panel de recorte (Trim)
     buildTrim('#trimPanel', state, onApplyTrim);
 
-    // 6) Construir panel Guardar/Cargar (.mid) con handlers
-    buildSaveLoad(
-      '#saveLoadPanel',
-      state,
-      // onLoadSequence (cuando el usuario carga un .mid)
-      (ns, meta = {}) => {
-        const name = meta.name || 'Importado';
-        const program = meta.program ?? 0;
-        const isDrum = !!meta.isDrum;
-        loadTrack(ns, { name, program, isDrum });
-      },
-      // onDownload (cuando el usuario pulsa "Descargar")
-      () => {
-        const active = state.tracks
-          .filter(t => t.isActive)
-          .map(t => setInstrument(t.ns, t.program ?? 0, t.isDrum ?? false));
-        if (active.length === 0) {
-          alert('No hay pistas activas para descargar.');
-          return;
-        }
-        const out = active.length === 1 ? active[0] : merge(active);
-        const filename = (state.title?.trim() || 'magenta_sandbox') + '.mid';
-        window.__lib.download(out, filename);
-      }
-    );
+    // evitamos duplicación: usamos los handlers declarados arriba
+    buildSaveLoad('#saveLoadPanel', state, onLoadSequence, onDownload);
 
-    //TO DO: Estas funciones las de arriba (onLoadSequence y onDownload) existen ya en este archivo, no es necesario volver a definirlas aquí.
-
-
-    // 7) Construir el panel de Pistas (lista, toggles, acciones)
     buildTracks('#tracksPanel', state, {
-      onMergeTracks,          // Une en paralelo A+B (o activas)
-      onTrackUpdate,          // Recalcula mezcla/visual y reproduce
-      onToggleTrack,          // Activa/desactiva una pista
-      onConcatenateTracks,    // Concatena temporalmente (A→B)
-      onSelectForConcat,      // Marca A o B al pulsar un botón
-      onClearConcatSelection  // Limpia la selección A/B
+      onMergeTracks,
+      onTrackUpdate,
+      onToggleTrack,
+      onConcatenateTracks,
+      onSelectForConcat,
+      onClearConcatSelection
     });
 
-    // 8) Exponer la FACHADA GLOBAL para que otros scripts (my-model.js) la usen
+    // Fachada global
     window.App = {
       mount,
-      loadTrack,              // Añadir pista al estado (y refrescar)
-      replaceMain,            // Reemplazar la pista “actual” (render+play)
-      getState: () => state,  // Lectura del estado para lógica externa (semillas, etc.)
+      loadTrack,
+      replaceMain,
+      getState: () => state,
       selectForConcat: onSelectForConcat,
       clearConcatSelection: onClearConcatSelection,
       concatLastTwo,
       concatAB
     };
-}
+  }
 
-  /* Añade una pista nueva al estado (tracks) y refresca la pista/visual/audio.
-     - ns: NoteSequence a añadir
-     - { name, program, isDrum }: metadatos opcionales de la pista
-  */
+  // -------------------------------
+  // API principal
+  // -------------------------------
   function loadTrack(ns, { name = 'Track', program = 0, isDrum = false } = {}) {
     state.tracks.push({ ns: ensureNsMeta(ns), name, program, isDrum, isActive: true });
     onTrackUpdate();
   }
 
-  /*
-    Reemplaza la melodía principal (current + original) por ns,
-    actualizando visualizador y reproductor.
-    Si ns es null, no hace nada.
-  */
-  async function replaceMain(ns) {
-    state.current = ns;
-    state.original = ns;
-    viz.render(ns);
-    player.start(ns, { qpm: state.qpm });
+  function replaceMain(ns) {
+    const safe = ensureNsMeta(ns);
+    // si había una pre-escucha de trim sonando, deténla
+    try { auditionPlayer?.stop?.(); } catch {}
+    auditionPlayer = null;
+
+    state.current  = safe;
+    state.original = safe;
+    viz.render(safe);
+    player.start(safe, { qpm: state.qpm });
   }
 
-
-  /*
-  Recorta un fragmento de la melodía actual entre dos tiempos (startSec y endSec).
-  Permite escuchar solo ese fragmento ("audition") o guardar el recorte como una nueva pista.
-  */
-
   function onApplyTrim({ startSec, endSec, audition = false, restore = false }) {
-    /*
-      - startSec: Segundo inicial del recorte.
-      - endSec: Segundo final del recorte.
-      - audition: Si es true, solo reproduce el recorte, no lo guarda.
-      - restore: Si es true, restaura la melodía original.
-    */
     if (restore) {
       if (state.original) replaceMain(state.original);
       return;
     }
     const source = state.current || state.original;
     if (!source) return;
+
     const trimmedNs = window.__lib.trim(source, startSec, endSec);
     if (audition) {
-      const auditionPlayer = new LoopingPlayer({});
-      auditionPlayer.start(trimmedNs, { qpm: state.qpm });
+      // gestiona una sola instancia global de audition
+      try { auditionPlayer?.stop?.(); } catch {}
+      auditionPlayer = new LoopingPlayer({});
+      auditionPlayer.start(ensureNsMeta(trimmedNs), { qpm: state.qpm });
     } else {
-      // Guardar el recorte como nueva pista
-      state.current = trimmedNs;
-      viz.render(trimmedNs);
-      player.start(trimmedNs, { qpm: state.qpm });
-
-      // Añade como nueva pista recortada
-      state.tracks.push({ ns: ensureNsMeta(trimmedNs), name: `Recorte ${startSec}s-${endSec}s`, program: false, isDrum: false, isActive: true });
+      state.current = ensureNsMeta(trimmedNs);
+      viz.render(state.current);
+      player.start(state.current, { qpm: state.qpm });
+      // además, añade el recorte como pista nueva
+      state.tracks.push({
+        ns: state.current,
+        name: `Recorte ${startSec}s-${endSec}s`,
+        program: 0,
+        isDrum: false,
+        isActive: true
+      });
       onTrackUpdate();
     }
   }
 
-    /* 
-    Concatena varias pistas musicales, una detrás de otra (no en paralelo, sino en secuencia temporal).
-    Puede hacerlo con dos pistas seleccionadas (A y B) o con todas las pistas activas.
-    */
   function onConcatenateTracks() {
-    // Usa A+B si están seleccionadas; si no, concatena todas las activas
     const { a, b } = state.concatSelection || {};
     try {
       if (Number.isInteger(a) && Number.isInteger(b) && a !== b) {
         const nameA = state.tracks[a]?.name || `Track ${a + 1}`;
         const nameB = state.tracks[b]?.name || `Track ${b + 1}`;
-        // Reutiliza el helper que añade una pista nueva, a,b son índices
         return concatCreateNew([a, b], { label: `Concatenación ${nameA} + ${nameB}` });
       }
-      // Fallback: concatenar todas las pistas activas en orden
       const activeIdx = state.tracks
         .map((t, i) => (t.isActive ? i : -1))
         .filter(i => i >= 0);
@@ -347,31 +300,21 @@ function ensureNsMeta(ns) {
     }
   }
 
-  /*
-    Permite seleccionar dos pistas (A y B) para realizar acciones que requieren dos pistas, como concatenar o unir en paralelo.
-    Gestiona la lógica de selección y, si corresponde, ejecuta la acción de unión automática.
-  */
-
   function onSelectForConcat(index) {
-    // Selecciona primero A, luego B. Si A y B ocupados, reinicia con A=index
     const sel = state.concatSelection || { a: null, b: null };
     if (!Number.isInteger(sel.a)) {
       sel.a = index;
     } else if (!Number.isInteger(sel.b) && index !== sel.a) {
       sel.b = index;
     } else if (index === sel.a) {
-      // Toggle A
       sel.a = null;
     } else if (index === sel.b) {
-      // Toggle B
       sel.b = null;
     } else {
-      // Ambos ocupados y clic en otro -> desplazar: A = B actual, B = nuevo
       sel.a = sel.b;
       sel.b = index;
     }
     state.concatSelection = { ...sel };
-    // Si estamos esperando unión y A/B están listos, ejecutar unión inmediata
     if (state.mergeAwaiting && Number.isInteger(sel.a) && Number.isInteger(sel.b) && sel.a !== sel.b) {
       const tA = state.tracks[sel.a];
       const tB = state.tracks[sel.b];
@@ -394,7 +337,6 @@ function ensureNsMeta(ns) {
     onTrackUpdate();
   }
 
-  // Helper: concatena en cuadrícula y añade nueva pista
   async function concatCreateNew(indexes, { label } = {}) {
     const seqs = indexes.map(i => state.tracks[i]?.ns).filter(Boolean);
     if (seqs.length < 2) return;
@@ -404,20 +346,14 @@ function ensureNsMeta(ns) {
     const spq = first?.quantizationInfo?.stepsPerQuarter ?? 4;
 
     const ns = concatOnGrid(seqs, { qpm, spq, mm: window.mm });
-
-    // Reutiliza loadTrack para añadir la nueva pista
     loadTrack(ensureNsMeta(ns), { name: label || 'Concatenación' });
-
-    // loadTrack ya llama a onTrackUpdate()
   }
 
-  // --- Helpers opcionales (si los usas en la UI), actualizados para refrescar correctamente ---
   function labelFromIndex(idx) {
     if (idx == null) return '—';
     return state.tracks[idx]?.name ?? `Pista ${idx + 1}`;
   }
 
-  // is this being used?
   async function concatLastTwo() {
     if (state.tracks.length < 2) return;
     const idxA = state.tracks.length - 2;
@@ -433,16 +369,6 @@ function ensureNsMeta(ns) {
     state.concatSelection = { a: null, b: null };
     onTrackUpdate(true);
   }
-
-  // Por este bloque correcto (alias a las funciones reales):
-  const actions = {
-    loadTrack,
-    replaceMain,
-    selectForConcat: onSelectForConcat,
-    clearConcatSelection: onClearConcatSelection,
-    concatLastTwo,
-    concatAB
-  };
 
   return { mount, loadTrack, replaceMain, getState: () => state };
 })();

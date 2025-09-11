@@ -92,11 +92,19 @@ window.addEventListener('DOMContentLoaded', () => {
   Tempo único del taller: QPM
   Resolución única del taller: SPQ
   */
-  const rnn = new MusicRnnService({
+  
+  // 1) Instancias
+  const rnnBasic = new MusicRnnService({
+    checkpointURL: CHECKPOINTS.musicrnn.basic,
+    qpm: QPM,
+    stepsPerQuarter: SPQ,
+  });
+  const rnnMelody = new MusicRnnService({
     checkpointURL: CHECKPOINTS.musicrnn.melody,
     qpm: QPM,
     stepsPerQuarter: SPQ,
   });
+
   const vae = new MusicVaeService({
     checkpointURL: CHECKPOINTS.musicvae.melody,
     qpm: QPM,
@@ -114,55 +122,40 @@ window.addEventListener('DOMContentLoaded', () => {
     temperature: 0.99
   });
 
-  //-- Botones de precargar los modelos de IA ---
-  const btnCocoPre = document.createElement('button');
-  btnCocoPre.textContent = 'Pre-cargar Coconet';
-  modelsPanel.appendChild(btnCocoPre);
-
-  btnCocoPre.onclick = async () => {
-    btnCocoPre.disabled = true;
-    const prev = btnCocoPre.textContent;
-    btnCocoPre.textContent = 'Cargando modelo… ⏳';
-    try {
-      await coco.initialize();
-      btnCocoPre.textContent = 'Coconet listo ✅';
-    } catch (e) {
-      console.error(e);
-      alert('No se pudo cargar Coconet: ' + (e?.message || String(e)));
-      btnCocoPre.textContent = prev;
-      btnCocoPre.disabled = false;
-    }
-  };
   
-
-  // --- Botón para MusicRNN (Continuar una melodía) ---
-  const btnRnn = document.createElement('button');
-  btnRnn.textContent = 'IA: Continuar Melodía (RNN)';
-  modelsPanel.appendChild(btnRnn);
-
-  btnRnn.onclick = async () => {
-    btnRnn.textContent = 'Generando... 🧠';
-    btnRnn.disabled = true;
-
+  // --- Botones para MusicRNN (Continuar una melodía) ---
+  async function runRnn(model, button, label, { steps = 64, temperature = 1.0 } = {}) {
+    button.disabled = true;
+    const prev = button.textContent;
+    button.textContent = 'Generando... 🧠';
     try {
-    await rnn.initialize(); // Asegura que el modelo esté cargado
-    const { current } = App.getState();   // ← mezcla activa ya unificada por generic.js
-    if (!current || !current.notes?.length) {
-      alert('No hay mezcla activa. Activa pistas o crea una escala/arpegio primero.');
-      return;
-    }
-
-    const cont = await rnn.continue(current, { steps: 64, temperature: 1.0 });
-    App.loadTrack(cont, { name: 'Continuación RNN (mezcla activa)' });
-
-    } catch (error) {
-        console.error('Error RNN:', error);
-        alert('Error al generar con MusicRNN: ' + (error?.message || String(error)));
+      await model.initialize();
+      const { current } = App.getState();   // mezcla de pistas activas
+      if (!current || !current.notes?.length) {
+        alert('No hay mezcla activa. Activa una melodía o crea una escala/arpegio primero.');
+        return;
+      }
+      const cont = await model.continue(current, { steps, temperature });
+      App.loadTrack(cont, { name: `${label} (cont.)` });
+    } catch (e) {
+      console.error(`${label} error:`, e);
+      alert(`Error en ${label}: ` + (e?.message || String(e)));
     } finally {
-      btnRnn.textContent = 'IA: Continuar Melodía (RNN)';
-      btnRnn.disabled = false;
+      button.textContent = prev;
+      button.disabled = false;
     }
-  };
+  }
+  
+  // Botones para los dos RNNs
+  const btnRnnBasic = document.createElement('button');
+  btnRnnBasic.textContent = 'IA: Continuar (Basic RNN)';
+  modelsPanel.appendChild(btnRnnBasic);
+  btnRnnBasic.onclick = () => runRnn(rnnBasic, btnRnnBasic, 'Basic RNN', { steps: 64, temperature: 1.0 });
+
+  const btnRnnMelody = document.createElement('button');
+  btnRnnMelody.textContent = 'IA: Continuar (Melody RNN)';
+  modelsPanel.appendChild(btnRnnMelody);
+  btnRnnMelody.onclick = () => runRnn(rnnMelody, btnRnnMelody, 'Melody RNN', { steps: 64, temperature: 1.0 });
 
   // --- Botón para MusicVAE (Crear una melodía desde cero) ---
   const btnVae = document.createElement('button');
