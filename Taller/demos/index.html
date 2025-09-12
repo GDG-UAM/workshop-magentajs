@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>Demos – Magenta Workshop</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="../generic/generic.css" />
+  <link rel="icon" type="image/svg+xml" href="../public/favicon.svg" />
+  <!-- Magenta (CDN) -->
+  <script src="https://unpkg.com/@magenta/music@1.23.1"></script>
+  <!-- App genérica -->
+  <script type="module" src="../generic/generic.js"></script>
+  <!-- Loader de demos -->
+  <script type="module" src="./loader.js"></script>
+</head>
+<body>
+  <header class="bar">
+    <input id="songTitle" placeholder="Título de la canción" />
+    <div id="transport"></div>
+  </header>
+
+  <main class="grid">
+    <section class="card">
+      <h3>Melodía / Pistas <span id="durationDisplay" style="font-weight:normal; font-size:0.8em; color:#999;"></span></h3>
+      <svg id="visualizer" class="viz"></svg>
+      <div id="tracksPanel"></div>
+    </section>
+
+    <aside class="card">
+      <h3>Herramientas</h3>
+      <div id="saveLoadPanel"></div>
+      <hr />
+      <h3>Modelos (Demo)</h3>
+      <div id="modelsPanel"></div>
+      <p style="margin-top:.75rem; color:#666;">
+        Abre con <code>?demo=baseline</code>, <code>?demo=rnn</code>, <code>?demo=vae</code>, <code>?demo=coconet</code>.
+      </p>
+    </aside>
+  </main>
+</body>
+</html>
