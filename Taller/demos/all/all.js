@@ -1,3 +1,4 @@
+<<<<<<< Updated upstream
 // File: Taller/demos/all/all.js
 // Demo “todo en uno” para el taller.
 // Muestra controles de: Baseline, RNN (basic/melody), VAE (melody/trio) y Coconet.
@@ -321,3 +322,5 @@ export function setup({ app, panel }) {
   // Nota al pie
   addP('Tip: combina Baseline→RNN→VAE→Coconet. Usa “Unir (Paralelo)” o “Concatenar” desde el panel de pistas.');
 }
+=======
+>>>>>>> Stashed changes
