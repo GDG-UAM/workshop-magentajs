@@ -24,6 +24,10 @@ export function setup({ app, panel }) {
   panel.appendChild(title);
   panel.appendChild(help);
 
+  // ╭──────────────────────╮
+  // │        VAE           │
+  // ╰──────────────────────╯
+
   const mkBtn = (label) => { const b = document.createElement('button'); b.textContent = label; panel.appendChild(b); return b; };
 
   // ------------------------------------------------------------------

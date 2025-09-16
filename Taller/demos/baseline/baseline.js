@@ -36,6 +36,11 @@ export function setup({ app, panel } = {}) {
   // Limpiamos el panel (si venías de otra demo)
   panel.innerHTML = '';
 
+
+  // ╭──────────────────────╮
+  // │  BASELINE (sin IA)   │
+  // ╰──────────────────────╯
+
   const { QPM } = WORKSHOP;
 
   // ------------------------------------------------------------------
