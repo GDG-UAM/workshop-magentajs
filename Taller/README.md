@@ -51,6 +51,7 @@ totalTime ≈ totalQuantizedSteps * segundosPorStep (si la secuencia está cuant
 | `totalQuantizedSteps` | Duración en pasos. | Útil para loops / slicing. |
 
 ---
+
 ## 3. Conceptos de Modelos (MusicVAE / MusicRNN / Coconet)
 
 | Concepto | Definición | Uso en código |
@@ -248,3 +249,5 @@ Basado en [Magenta.js](https://github.com/magenta/magenta-js). Adaptado para fin
 ---
 ¿Algo que falte? Puedes ampliar este README añadiendo más ejemplos específicos del taller.
 
+
+Made By Lore and Jose :)
